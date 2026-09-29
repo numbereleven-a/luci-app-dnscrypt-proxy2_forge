@@ -1,0 +1,50 @@
+#!/usr/bin/lua
+local json = require('luci.jsonc')
+local ubus = require('ubus')
+
+local function reply(value)
+  print(json.stringify(value))
+end
+
+if arg[1] == 'list' then
+  reply({ logs = { service = 'string', instance = 'string', previous_pid = 0 } })
+  os.exit(0)
+end
+if arg[1] ~= 'call' or arg[2] ~= 'logs' then os.exit(1) end
+
+local request = json.parse(io.read('*a')) or {}
+local service, name = request.service, request.instance
+if type(service) ~= 'string' or not service:match('^dnscrypt%-proxy[%w_-]*$')
+  or type(name) ~= 'string' or not name:match('^[%w_-]+$') then
+  reply({ error = 'Invalid service or instance' }); os.exit(0)
+end
+
+local connection = ubus.connect()
+if not connection then reply({ error = 'Unable to connect to service manager' }); os.exit(0) end
+local services = connection:call('service', 'list', { name = service }) or {}
+connection:close()
+local instance = ((services[service] or {}).instances or {})[name]
+if instance and ((instance.command or {})[1] ~= '/usr/sbin/dnscrypt-proxy') then
+  reply({ error = 'Not a DNSCrypt instance' }); os.exit(0)
+end
+local pid = instance and instance.pid or nil
+local previous = tonumber(request.previous_pid)
+if previous and (previous < 1 or previous > 4194304 or previous % 1 ~= 0) then previous = nil end
+
+-- Read the bounded system log; return only this DNSCrypt service/process.
+local handle = io.popen('/sbin/logread -l 1000 2>/dev/null', 'r')
+if not handle then reply({ error = 'Unable to read system log' }); os.exit(0) end
+local lines = {}
+for line in handle:lines() do
+  local label, linepid = line:match(' ([%w_-]+)%[(%d+)%]:')
+  linepid = tonumber(linepid)
+  if (label == service or label == 'dnscrypt-proxy')
+    and linepid and (linepid == pid or linepid == previous) then
+    lines[#lines + 1] = line
+    if #lines > 250 then table.remove(lines, 1) end
+  end
+end
+local success = handle:close()
+if not success then reply({ error = 'System log reader failed' }); os.exit(0) end
+reply({ running = instance and instance.running == true or false, pid = pid or 0,
+  log = table.concat(lines, '\n'), source = 'syslog' })

@@ -1,0 +1,5 @@
+DNSCrypt-Proxy 2 Forge includes interface code adapted from:
+https://github.com/ewgen198409/luci-app-dnscrypt-proxy2
+Upstream revision: b9978fe2f448e8fb7a6aaa03762f97f1c293daba
+Upstream declares GPL-3.0-or-later in its package metadata and README.
+This distribution is licensed under GPL-3.0-or-later.

@@ -1,0 +1,65 @@
+{
+  "luci-app-dnscrypt-proxy2-forge": {
+    "description": "Manage discovered DNSCrypt-Proxy instances",
+    "read": {
+      "uci": [
+        "luci"
+      ],
+      "ubus": {
+        "file": [
+          "list",
+          "read",
+          "stat"
+        ],
+        "service": [
+          "list"
+        ],
+        "dnscrypt-forge": [
+          "logs"
+        ]
+      },
+      "file": {
+        "/etc/init.d": [
+          "list"
+        ],
+        "/etc/init.d/dnscrypt-proxy*": [
+          "read"
+        ],
+        "/etc/dnscrypt-proxy2/*": [
+          "read"
+        ],
+        "/etc/config/luci": [
+          "read"
+        ],
+        "/var/log/dnscrypt-proxy*": [
+          "read"
+        ]
+      }
+    },
+    "write": {
+      "ubus": {
+        "file": [
+          "exec",
+          "write"
+        ]
+      },
+      "file": {
+        "/etc/dnscrypt-proxy2/*.toml": [
+          "write"
+        ],
+        "/usr/sbin/dnscrypt-proxy -config /etc/dnscrypt-proxy2/*.toml -list -json": [
+          "exec"
+        ],
+        "/etc/init.d/dnscrypt-proxy* start": [
+          "exec"
+        ],
+        "/etc/init.d/dnscrypt-proxy* stop": [
+          "exec"
+        ],
+        "/etc/init.d/dnscrypt-proxy* restart": [
+          "exec"
+        ]
+      }
+    }
+  }
+}
