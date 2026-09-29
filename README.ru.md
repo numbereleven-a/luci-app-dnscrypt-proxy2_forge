@@ -40,7 +40,7 @@
 
 ## Установка
 
-Скачайте IPK и `SHA256SUMS` из раздела [Releases](https://github.com/numbereleven-a/luci-app-dnscrypt-proxy2_forge/releases), проверьте контрольную сумму и перенесите IPK на роутер.
+Скачайте ZIP для своей версии OpenWrt из раздела [Releases](https://github.com/numbereleven-a/luci-app-dnscrypt-proxy2_forge/releases) и распакуйте его. В каждом архиве находятся пакет, `SHA256SUMS`, документация и файлы лицензии. Для OpenWrt 24.10.1 проверьте контрольную сумму извлечённого IPK и перенесите его на роутер.
 
 ```sh
 opkg install /tmp/luci-app-dnscrypt-proxy2-forge_0.1.3-r1_all.ipk

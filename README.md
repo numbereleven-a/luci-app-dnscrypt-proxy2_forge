@@ -40,7 +40,7 @@ Current version: **0.1.3-r1**. Tested on **OpenWrt 24.10.1**, **GL.iNet GL-MT600
 
 ## Installation
 
-For OpenWrt 24.10.1, download the IPK and `SHA256SUMS` from [Releases](https://github.com/numbereleven-a/luci-app-dnscrypt-proxy2_forge/releases), verify the checksum, and transfer the IPK to the router.
+Download the ZIP for your OpenWrt version from [Releases](https://github.com/numbereleven-a/luci-app-dnscrypt-proxy2_forge/releases) and extract it. Each archive contains the package, `SHA256SUMS`, documentation, and license files. For OpenWrt 24.10.1, verify the extracted IPK checksum and transfer it to the router.
 
 ```sh
 opkg install /tmp/luci-app-dnscrypt-proxy2-forge_0.1.3-r1_all.ipk
