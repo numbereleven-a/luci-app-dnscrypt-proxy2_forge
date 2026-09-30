@@ -11,8 +11,8 @@ package = Path(sys.argv[1])
 expected = {
     'usr/libexec/rpcd/dnscrypt-forge-files': root / 'root/usr/libexec/rpcd/dnscrypt-forge-files',
     'usr/libexec/rpcd/dnscrypt-forge': root / 'root/usr/libexec/rpcd/dnscrypt-forge',
-    'www/luci-static/resources/dnscrypt-forge-v13r5.js': root / 'htdocs/luci-static/resources/dnscrypt-forge-v13r5.js',
-    'www/luci-static/resources/view/dnscrypt-proxy2-forge/dnscrypt-proxy2-v13r5.js': root / 'htdocs/luci-static/resources/view/dnscrypt-proxy2-forge/dnscrypt-proxy2-v13r5.js',
+    'www/luci-static/resources/dnscrypt-forge-v13r6.js': root / 'htdocs/luci-static/resources/dnscrypt-forge-v13r6.js',
+    'www/luci-static/resources/view/dnscrypt-proxy2-forge/dnscrypt-proxy2-v13r6.js': root / 'htdocs/luci-static/resources/view/dnscrypt-proxy2-forge/dnscrypt-proxy2-v13r6.js',
     'usr/share/luci/menu.d/luci-app-dnscrypt-proxy2-forge.json': root / 'root/usr/share/luci/menu.d/luci-app-dnscrypt-proxy2-forge.json',
     'usr/share/rpcd/acl.d/luci-app-dnscrypt-proxy2-forge.json': root / 'root/usr/share/rpcd/acl.d/luci-app-dnscrypt-proxy2-forge.json',
     'usr/share/doc/luci-app-dnscrypt-proxy2-forge/LICENSE': root / 'LICENSE',

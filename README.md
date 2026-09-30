@@ -6,7 +6,7 @@ A LuCI interface for DNSCrypt-Proxy 2 with **multiple instance support**, **deta
 
 Based on [ewgen198409/luci-app-dnscrypt-proxy2](https://github.com/ewgen198409/luci-app-dnscrypt-proxy2), upstream revision [`b9978fe`](https://github.com/ewgen198409/luci-app-dnscrypt-proxy2/tree/b9978fe2f448e8fb7a6aaa03762f97f1c293daba). Compared with the original interface, Forge adds independent management of multiple DNSCrypt instances, detailed startup and restart output, safer configuration saving, custom DNS stamps, rule-file editors with Undo/Redo and saved versions, and a searchable resolver catalog.
 
-Current version: **1.3-r5**. Tested on **OpenWrt 24.10.1**, **GL.iNet GL-MT6000**, mediatek/filogic, aarch64_cortex-a53. Installation and correct operation of the earlier **0.1.3-r1** IPK on **OpenWrt 23.05.5** have also been verified. A separate **APK build for OpenWrt 25.12.5** is available; its package contents are verified, but router runtime testing is pending.
+Current version: **1.3-r6**. Tested on **OpenWrt 24.10.1**, **GL.iNet GL-MT6000**, mediatek/filogic, aarch64_cortex-a53. Installation and correct operation of the earlier **0.1.3-r1** IPK on **OpenWrt 23.05.5** have also been verified. A separate **APK build for OpenWrt 25.12.5** is available; its package contents are verified, but router runtime testing is pending.
 
 ![Instance overview, service operation output and rule-file editor](docs/images/overview.jpg)
 
@@ -27,14 +27,14 @@ Current version: **1.3-r5**. Tested on **OpenWrt 24.10.1**, **GL.iNet GL-MT6000*
 Download the ZIP for your OpenWrt version from [Releases](https://github.com/numbereleven-a/luci-app-dnscrypt-proxy2_forge/releases) and extract it. Each archive contains the package, `SHA256SUMS`, documentation, and license files. For OpenWrt 24.10.1, verify the extracted IPK checksum and transfer it to the router.
 
 ```sh
-opkg install /tmp/luci-app-dnscrypt-proxy2-forge_1.3-r5_all.ipk
+opkg install /tmp/luci-app-dnscrypt-proxy2-forge_1.3-r6_all.ipk
 /etc/init.d/rpcd reload
 ```
 
 For OpenWrt **25.12.5**, extract the corresponding ZIP and verify its APK against `SHA256SUMS`, then install:
 
 ```sh
-apk add --allow-untrusted /tmp/luci-app-dnscrypt-proxy2-forge-1.3-r5.apk
+apk add --allow-untrusted /tmp/luci-app-dnscrypt-proxy2-forge-1.3-r6.apk
 /etc/init.d/rpcd reload
 ```
 
@@ -49,7 +49,7 @@ Refresh LuCI and open **Services → DNSCrypt-Proxy 2 Forge**. The package uses 
 Select an instance before editing or using the service buttons.
 
 - **Save** writes the selected configuration.
-- **Save & Apply** writes it and restarts the selected service.
+- **Save & Apply** writes it and restarts the selected service only if it is running. A stopped service remains stopped; use **Start** to apply its saved settings.
 - **Start / Stop / Restart** control the selected service and display operation output.
 - The **Configuration** tab provides the raw TOML editor. Save raw edits with its own **Save** button, then restart the service to apply them.
 - Rule-file editors show whether each file is enabled in TOML. Save edits the file; Use this file changes its TOML reference; Stop using rules keeps the file.
@@ -85,7 +85,7 @@ node tests/multi-instance.test.cjs
 node tests/browser.test.cjs
 node tests/security-render.test.cjs
 lua tests/rpc-logs.test.lua root/usr/libexec/rpcd/dnscrypt-forge
-python scripts/verify-package.py /path/to/luci-app-dnscrypt-proxy2-forge_1.3-r5_all.ipk
+python scripts/verify-package.py /path/to/luci-app-dnscrypt-proxy2-forge_1.3-r6_all.ipk
 ```
 
 Browser checks require `selenium-webdriver`, Firefox, and geckodriver. Override their locations with `SELENIUM_MODULE_ROOT`, `FIREFOX_BINARY`, and `GECKODRIVER`. RPC checks require Lua 5.1, `luci.jsonc`, and `ubus`.
@@ -94,7 +94,7 @@ To build an APK with the **OpenWrt 25.12.5 mediatek/filogic SDK**:
 
 ```sh
 sh scripts/build-openwrt-25.12.5.sh /path/to/openwrt-sdk-25.12.5-mediatek-filogic_gcc-14.3.0_musl.Linux-x86_64
-python scripts/verify-apk-package.py /path/to/luci-app-dnscrypt-proxy2-forge-1.3-r5.apk /path/to/sdk/staging_dir/host/bin/apk
+python scripts/verify-apk-package.py /path/to/luci-app-dnscrypt-proxy2-forge-1.3-r6.apk /path/to/sdk/staging_dir/host/bin/apk
 ```
 
 APK artifacts are saved under `artifacts/1.3/openwrt-25.12.5-aarch64_cortex-a53/`. The APK verifier requires Linux and apk-tools 3 from the SDK.

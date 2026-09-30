@@ -5,7 +5,7 @@
 'require poll';
 'require rpc';
 'require ui';
-'require dnscrypt-forge-v13r5 as forge';
+'require dnscrypt-forge-v13r6 as forge';
 
 var CONFIG_FILE, INIT_SCRIPT, selectedInstance, allInstances = [], loadedConfig = '';
 var originalFields = {};
@@ -1149,12 +1149,19 @@ return view.extend({
 	
 	handleSaveApply: function() {
 		var self = this;
+		var restartNeeded = false;
 		if (actionBusy) return Promise.reject(new Error(i18n('An operation is already in progress.')));
 		if (selectedInstance.shared) return Promise.reject(new Error(i18n('This service controls multiple instances. Use SSH for service actions.')));
-		return this.saveConfig().then(function() {
-			return control('restart');
+		return callServiceList(selectedInstance.service).then(function(services) {
+			var service = services[selectedInstance.service];
+			var instance = service && service.instances && service.instances[selectedInstance.instance];
+			restartNeeded = !!(instance && instance.running);
+			return self.saveConfig();
 		}).then(function() {
-			showNotification(null, i18n('Configuration saved and service restarted'), 'info');
+			if (restartNeeded) return control('restart');
+		}).then(function() {
+			showNotification(null, restartNeeded ? i18n('Configuration saved and service restarted') :
+				editorLabel('Configuration saved. Service remains stopped; use Start to apply changes.', 'Конфигурация сохранена. Сервис остаётся остановленным; нажмите Старт для применения изменений.'), 'info');
 		}).catch(function(e) {
 			showNotification(null, i18n('Error') + ': ' + (e.message || JSON.stringify(e)), 'error');
 		});
@@ -2004,7 +2011,7 @@ return view.extend({
 			submit: ui.createHandlerFn(this, 'handleSave')
 		}, [
 			textElement('h2', {}, 'DNSCrypt-Proxy 2 Forge'),
-            textElement('p',{id:'forge-version'},[editorLabel('Version: ','Версия: '),'1.3-r5 · ',textElement('a',{href:'https://github.com/numbereleven-a/luci-app-dnscrypt-proxy2_forge',target:'_blank',rel:'noopener noreferrer'},'GitHub')]),
+            textElement('p',{id:'forge-version'},[editorLabel('Version: ','Версия: '),'1.3-r6 · ',textElement('a',{href:'https://github.com/numbereleven-a/luci-app-dnscrypt-proxy2_forge',target:'_blank',rel:'noopener noreferrer'},'GitHub')]),
 			instancePanel,
 			statusSection,
 			controlSection,

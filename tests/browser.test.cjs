@@ -7,8 +7,8 @@ const moduleRoot = process.env.SELENIUM_MODULE_ROOT || 'selenium-webdriver';
 const {Builder, By, until} = require(moduleRoot);
 const firefox = require(moduleRoot + '/firefox');
 const root = path.resolve(__dirname, '..');
-const helper = fs.readFileSync(path.join(root, 'htdocs/luci-static/resources/dnscrypt-forge-v13r5.js'), 'utf8');
-const view = fs.readFileSync(path.join(root, 'htdocs/luci-static/resources/view/dnscrypt-proxy2-forge/dnscrypt-proxy2-v13r5.js'), 'utf8');
+const helper = fs.readFileSync(path.join(root, 'htdocs/luci-static/resources/dnscrypt-forge-v13r6.js'), 'utf8');
+const view = fs.readFileSync(path.join(root, 'htdocs/luci-static/resources/view/dnscrypt-proxy2-forge/dnscrypt-proxy2-v13r6.js'), 'utf8');
 const resolverParser = "function parseResolverList(output) {\n  for(var start=output.indexOf('[');start>=0;start=output.indexOf('[',start+1)) {\n    var depth=0, quoted=false, escaped=false;\n    for(var i=start;i<output.length;i++) {\n      var ch=output.charAt(i);\n      if(quoted) {if(escaped)escaped=false;else if(ch==='\\\\')escaped=true;else if(ch==='\"')quoted=false;continue;}\n      if(ch==='\"'){quoted=true;continue;}\n      if(ch==='[')depth++;\n      if(ch===']' && --depth===0) {\n        try {var value=JSON.parse(output.slice(start,i+1));\n          if(Array.isArray(value) && value.every(function(item){return item && typeof item.name==='string';}))return value;\n        } catch(error) {}\n        break;\n      }\n    }\n  }\n  throw new Error(editorLabel('DNSCrypt returned no readable resolver list. Check the configured sources and operation output.','DNSCrypt не вернул читаемый список DNS. Проверьте настроенные источники и вывод операций.'));\n}\n";
 const hostileComment = '# literal &amp; ?a=1&region=eu </textarea><img src=x onerror="window.htmlInjected=true">\n';
 const fixture = `<!doctype html><html><meta charset="utf-8"><title>Forge interface test</title>
@@ -53,7 +53,7 @@ async function main() {
     await driver.get(url);
     await driver.wait(async()=>driver.executeScript('return window.ready || false'),10000);
     assert.equal(await driver.executeScript('return document.getElementById("config-textarea").value === app.configContent'),true,'TOML must remain literal, including HTML entities and closing tags');
-    assert.match(await driver.findElement(By.id('forge-version')).getText(),/1\.3-r5/);
+    assert.match(await driver.findElement(By.id('forge-version')).getText(),/1\.3-r6/);
     assert.equal(await driver.findElement(By.css('#forge-version a')).getAttribute('href'),'https://github.com/numbereleven-a/luci-app-dnscrypt-proxy2_forge');
     assert.equal((await driver.findElements(By.css('#instance-overview th'))).length,4);
     assert.equal(await driver.findElement(By.id('instance-listen-dnscrypt-proxy/instance1')).getText(),'127.0.0.1:5300');
@@ -92,6 +92,13 @@ async function main() {
     await driver.executeScript('refreshStatus()');
     await driver.wait(async()=>driver.findElement(By.id('btn_start')).isEnabled(),3000);
     assert.equal(await driver.findElement(By.id('btn_stop')).isEnabled(),false);
+    const commandsAfterStop = await driver.executeScript('return commands.length');
+    await driver.executeScript("document.querySelector('[name=server_names]').value='resolver-stopped';return app.handleSaveApply();");
+    assert.equal(await driver.executeScript('return commands.length'),commandsAfterStop,'Save & Apply must not start a stopped service');
+    await driver.executeScript('return refreshStatus()');
+    assert.equal(await driver.findElement(By.id('btn_start')).isEnabled(),true);
+    assert.equal(await driver.findElement(By.id('btn_stop')).isEnabled(),false);
+    assert.match(await driver.executeScript('return files["/etc/dnscrypt-proxy2/backup/dnscrypt-proxy.toml"]'),/resolver-stopped/);
     await driver.findElement(By.css('#tab-logging a')).click();
     await driver.findElement(By.id('btn_refresh_log')).click();
     await driver.wait(until.elementTextContains(await driver.findElement(By.id('log-view-content')),'resolver-b'),3000);

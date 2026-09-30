@@ -4,7 +4,7 @@
     "order": 50,
     "action": {
       "type": "view",
-      "path": "dnscrypt-proxy2-forge/dnscrypt-proxy2-v13r5"
+      "path": "dnscrypt-proxy2-forge/dnscrypt-proxy2-v13r6"
     },
     "depends": {
       "acl": [
