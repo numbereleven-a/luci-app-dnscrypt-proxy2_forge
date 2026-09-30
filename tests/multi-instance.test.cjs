@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const source = fs.readFileSync(path.join(__dirname, '../htdocs/luci-static/resources/dnscrypt-forge-v013r1.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../htdocs/luci-static/resources/dnscrypt-forge-v13r5.js'), 'utf8');
 class BaseClass {
   static extend(properties) {
     class Child extends this {}
@@ -56,7 +56,7 @@ assert.equal(forge.parseToml(forge.updateToml('proxy = "old"\n', { proxy: 'a\\b"
 assert.throws(() => forge.updateToml('server_names = [\n', { server_names: [] }));
 
 // Exercise the actual view handlers with a DOM containing the editable fields.
-const viewSource = fs.readFileSync(path.join(__dirname, '../htdocs/luci-static/resources/view/dnscrypt-proxy2-forge/dnscrypt-proxy2-v013r1.js'), 'utf8');
+const viewSource = fs.readFileSync(path.join(__dirname, '../htdocs/luci-static/resources/view/dnscrypt-proxy2-forge/dnscrypt-proxy2-v13r5.js'), 'utf8');
 const elements = {};
 const form = { querySelectorAll: () => Object.values(elements).filter(el => el.name) };
 const files = { [config]: toml, [backup]: toml.replace('5300', '5400') };
@@ -64,7 +64,7 @@ const writes = [], commands = [];
 const context = {
   forge, URL, Number, Promise, console,
   view: { extend: obj => obj },
-  rpc: { declare: ({object}) => object === 'dnscrypt-forge' ? async () => ({pid: 123, running: true, log: 'Ready ' + commands.length}) : object === 'uci' ? async () => ({value: 'en'}) : async name => name ? { [name]: services[name] } : services },
+  rpc: { declare: ({object,method}) => object === 'dnscrypt-forge-files' ? async (config,path,content,expected,exists) => { if(method==='write'){if(files[path]!==expected) return {error:'File changed externally'};writes.push(path);files[path]=content;return {saved:true};}return {content:files[path]||'',exists:path in files,versions:[]};} : object === 'dnscrypt-forge' ? async () => ({pid: 123, running: true, log: 'Ready ' + commands.length}) : object === 'uci' ? async () => ({value: 'en'}) : async name => name ? { [name]: services[name] } : services },
   fs: {
     read: async file => file.startsWith('/etc/init.d/') ? script(file.endsWith('backup') ? backup : config) : files[file],
     list: async () => [{name: 'dnscrypt-proxy'}, {name: 'dnscrypt-proxy-backup'}, {name: 'dnscrypt-failover'}],

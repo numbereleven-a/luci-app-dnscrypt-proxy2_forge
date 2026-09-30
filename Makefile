@@ -1,8 +1,8 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-dnscrypt-proxy2-forge
-PKG_VERSION:=0.1.3
-PKG_RELEASE:=1
+PKG_VERSION:=1.3
+PKG_RELEASE:=5
 PKG_LICENSE:=GPL-3.0-or-later
 
 include $(INCLUDE_DIR)/package.mk
@@ -32,14 +32,14 @@ endef
 
 define Package/$(PKG_NAME)/install
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/dnscrypt-proxy2-forge
-	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/dnscrypt-proxy2-forge/dnscrypt-proxy2-v013r1.js $(1)/www/luci-static/resources/view/dnscrypt-proxy2-forge/
+	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/dnscrypt-proxy2-forge/dnscrypt-proxy2-v13r5.js $(1)/www/luci-static/resources/view/dnscrypt-proxy2-forge/
 	$(INSTALL_DIR) $(1)/www/luci-static/resources
-	$(INSTALL_DATA) ./htdocs/luci-static/resources/dnscrypt-forge-v013r1.js $(1)/www/luci-static/resources/
+	$(INSTALL_DATA) ./htdocs/luci-static/resources/dnscrypt-forge-v13r5.js $(1)/www/luci-static/resources/
 	$(INSTALL_DIR) $(1)/usr/share/luci/menu.d $(1)/usr/share/rpcd/acl.d
 	$(INSTALL_DATA) ./root/usr/share/luci/menu.d/*.json $(1)/usr/share/luci/menu.d/
 	$(INSTALL_DATA) ./root/usr/share/rpcd/acl.d/*.json $(1)/usr/share/rpcd/acl.d/
 	$(INSTALL_DIR) $(1)/usr/libexec/rpcd
-	$(INSTALL_BIN) ./root/usr/libexec/rpcd/dnscrypt-forge $(1)/usr/libexec/rpcd/
+	$(INSTALL_BIN) ./root/usr/libexec/rpcd/dnscrypt-forge ./root/usr/libexec/rpcd/dnscrypt-forge-files $(1)/usr/libexec/rpcd/
 	$(INSTALL_DIR) $(1)/usr/share/doc/$(PKG_NAME)
 	$(INSTALL_DATA) ./LICENSE ./NOTICE $(1)/usr/share/doc/$(PKG_NAME)/
 endef

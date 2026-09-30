@@ -1,0 +1,181 @@
+#!/usr/bin/lua
+local json = require('luci.jsonc')
+local fs = require('nixio.fs')
+local nixio = require('nixio')
+local root = '/etc/dnscrypt-proxy2/'
+local history = root .. '.forge-history'
+local limit = 1048576
+local function reply(value) print(json.stringify(value)) end
+local methods = {
+  resolvers = {config='string',all=true},
+  stat = {config='string',path='string'},
+  read = {config='string',path='string'},
+  write = {config='string',path='string',content='string',expected='string',exists=true},
+  versions = {config='string',path='string'},
+  version = {config='string',path='string',id='string'}
+}
+if arg[1] == 'list' then reply(methods); os.exit(0) end
+if arg[1] ~= 'call' or not methods[arg[2]] then os.exit(1) end
+local request = json.parse(io.read('*a')) or {}
+local function fail(message) error(message, 0) end
+local function safe(path, extension)
+  if type(path) ~= 'string' or #path > 220 or path:sub(1,#root) ~= root then return false end
+  local relative = path:sub(#root+1)
+  if relative == '' or relative:find('//',1,true) then return false end
+  for part in relative:gmatch('[^/]+') do
+    if part == '.' or part == '..' or part:sub(1,1)=='.' or not part:match('^[%w_.-]+$') then return false end
+  end
+  return relative:match(extension .. '$') ~= nil
+end
+local function noLinks(path)
+  local current = ''
+  for part in path:gmatch('[^/]+') do
+    current = current .. '/' .. part
+    local stat = fs.lstat(current)
+    if stat and stat.type == 'lnk' then fail('Symbolic links are not editable') end
+  end
+end
+local function read(path)
+  noLinks(path)
+  local stat = fs.stat(path)
+  if not stat then return '', false end
+  if stat.type ~= 'reg' or stat.size > limit then fail('File cannot be loaded in LuCI: only regular files up to 1024 KiB can be edited. Edit larger files manually over SSH.') end
+  local value = fs.readfile(path)
+  if value == nil then fail('Unable to read file') end
+  return value, true
+end
+local function folder(path)
+  noLinks(path)
+  if not fs.stat(path) and not fs.mkdir(path,'700') then fail('Unable to create history directory') end
+  fs.chmod(path,'700')
+end
+local function revisions(directory)
+  local result = {}
+  if fs.stat(directory) then
+    noLinks(directory)
+    for name in fs.dir(directory) do
+      if name:match('^%d+%-%d+%.txt$') then result[#result+1] = name end
+    end
+  end
+  table.sort(result,function(a,b) return a>b end)
+  return result
+end
+local function resolverList(config, all)
+  if type(all)~='boolean' then fail('Invalid catalog mode') end
+  -- config has passed the strict ASCII path validation; no caller-supplied command or flags.
+  local pipe=io.popen('/usr/sbin/dnscrypt-proxy -config '..config..(all and ' -list-all' or ' -list')..' -json 2>&1')
+  if not pipe then fail('Unable to load resolvers') end
+  local chunks, size={},0
+  while true do
+    local chunk=pipe:read(4096)
+    if not chunk then break end
+    size=size+#chunk
+    if size>2097152 then pipe:close();fail('Resolver catalog exceeds 2 MiB') end
+    chunks[#chunks+1]=chunk
+  end
+  pipe:close()
+  local output=table.concat(chunks)
+  for start=1,#output do
+    if output:sub(start,start)=='[' then
+      local depth,quoted,escaped=0,false,false
+      for position=start,#output do
+        local char=output:sub(position,position)
+        if quoted then
+          if escaped then escaped=false elseif char=='\\' then escaped=true elseif char=='"' then quoted=false end
+        elseif char=='"' then quoted=true
+        elseif char=='[' then depth=depth+1
+        elseif char==']' then
+          depth=depth-1
+          if depth==0 then
+            local value=json.parse(output:sub(start,position))
+            if type(value)=='table' then
+              local servers,valid={},true
+              for _,server in ipairs(value) do
+                if type(server)~='table' or type(server.name)~='string' then valid=false;break end
+                local addresses={}
+                for _,address in ipairs(type(server.addrs)=='table' and server.addrs or {}) do
+                  if type(address)=='string' then addresses[#addresses+1]=address end
+                end
+                servers[#servers+1]={name=server.name,proto=type(server.proto)=='string' and server.proto or '',addrs=addresses}
+              end
+              if valid then
+                if #servers==0 then fail('No resolvers available for this configuration') end
+                return {servers=servers}
+              end
+            end
+            break
+          end
+        end
+      end
+    end
+  end
+  fail('DNSCrypt returned no readable resolver list')
+end
+local lock
+local ok, result = pcall(function()
+  local config, path = request.config, request.path
+  if not safe(config,'%.toml') then fail('Invalid configuration path') end
+  noLinks(config)
+  local _, configExists = read(config)
+  if not configExists then fail('Configuration does not exist') end
+  if arg[2]=='resolvers' then return resolverList(config,request.all) end
+  if not (path == config or safe(path,'%.txt') or safe(path,'%.overall')) then fail('Invalid rule-file path') end
+  noLinks(path)
+  local info=fs.stat(path)
+  if arg[2]=='stat' then return {exists=info~=nil,size=info and info.size or 0,limit=limit,editable=not info or info.type=='reg' and info.size<=limit} end
+  local content, exists = read(path)
+  local directory = history .. '/' .. path:sub(#root+1):gsub('/','!')
+  if arg[2] == 'read' then return {content=content,exists=exists,path=path} end
+  if arg[2] == 'versions' then
+    local items = {}
+    for _, id in ipairs(revisions(directory)) do
+      items[#items+1] = {id=id,time=tonumber(id:match('^(%d+)'))}
+    end
+    return {versions=items}
+  end
+  if arg[2] == 'version' then
+    if type(request.id)~='string' or not request.id:match('^%d+%-%d+%.txt$') then fail('Invalid version') end
+    local saved, found = read(directory .. '/' .. request.id)
+    if not found then fail('Version no longer exists') end
+    return {content=saved}
+  end
+  if type(request.content)~='string' or #request.content>limit or request.content:find('\0',1,true)
+    or type(request.expected)~='string' or type(request.exists)~='boolean' then fail('Invalid file content') end
+  folder(history); folder(directory)
+  lock = directory .. '/lock'
+  if not fs.mkdir(lock,'700') then lock=nil; fail('Another save is in progress') end
+  content, exists = read(path)
+  if content~=request.expected or exists~=request.exists then fail('File changed externally. Reload it before saving.') end
+  if exists and content==request.content then return {saved=true,unchanged=true} end
+  local temporary = directory .. '/pending'
+  noLinks(temporary)
+  if not fs.writefile(temporary,request.content) then fail('Unable to stage file') end
+  fs.chmod(temporary,'600')
+  if exists then
+    local id = string.format('%010d-%010d.txt',os.time(),nixio.getpid())
+    noLinks(directory .. '/' .. id)
+    if not fs.writefile(directory .. '/' .. id,content) then fs.unlink(temporary); fail('Unable to save previous version') end
+    fs.chmod(directory .. '/' .. id,'600')
+  end
+  -- Preserve ownership and ordinary permission bits for an existing file.
+  local stat = exists and fs.stat(path) or nil
+  local mode = 420
+  if stat then
+    mode = 0
+    local bits = {256,128,64,32,16,8,4,2,1}
+    for i=1,9 do
+      local char = (stat.modestr or ''):sub(i,i)
+      if char=='r' or char=='w' or char=='x' then mode=mode+bits[i] end
+    end
+    if not stat.modestr or #stat.modestr~=9 then mode=384 end
+    if not fs.chown(temporary,stat.uid,stat.gid) then fail('Unable to preserve file ownership') end
+  end
+  if not fs.chmod(temporary,string.format("%o",mode)) then fail('Unable to set file permissions') end
+  noLinks(path)
+  if not fs.rename(temporary,path) then fs.unlink(temporary); fail('Unable to replace file') end
+  local items = revisions(directory)
+  for i=11,#items do fs.unlink(directory .. '/' .. items[i]) end
+  return {saved=true}
+end)
+if lock then fs.rmdir(lock) end
+reply(ok and result or {error=tostring(result)})

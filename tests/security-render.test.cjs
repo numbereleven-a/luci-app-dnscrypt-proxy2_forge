@@ -60,7 +60,7 @@ async function main() {
     // The same modal error boundary handles empty lists and command stderr.
     for (const field of ['server_names','disabled_server_names']) {
       for (const output of [{code:0,stdout:'[]'},{code:1,stderr:markup}]) {
-        await driver.executeScript('apiFs.exec=async()=>arguments[0]',output);
+        await driver.executeScript('window.resolverError=arguments[0].code?arguments[0].stderr:null;apiFs.exec=async()=>arguments[0]',output);
         const input = await driver.findElement(By.css('[name="' + field + '"]'));
         const tab = await driver.executeScript('return arguments[0].closest("[id^=panel-]").getAttribute("data-tab")',input);
         await driver.findElement(By.css('#tab-' + tab + ' a')).click();

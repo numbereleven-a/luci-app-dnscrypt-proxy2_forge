@@ -1,0 +1,50 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const http = require('node:http');
+const {fixture} = require('./browser.test.cjs');
+const moduleRoot = process.env.SELENIUM_MODULE_ROOT || 'selenium-webdriver';
+const {Builder,By} = require(moduleRoot);
+const firefox = require(moduleRoot+'/firefox');
+async function main() {
+  const server=http.createServer((req,res)=>{res.setHeader('Content-Type','text/html;charset=utf-8');res.end(fixture.replaceAll('window.location.reload()', 'window.savedReload=true'));});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  let driver;
+  try {
+    const options=new firefox.Options().addArguments('-headless');
+    if(process.env.FIREFOX_BINARY)options.setBinary(process.env.FIREFOX_BINARY);
+    const builder=new Builder().forBrowser('firefox').setFirefoxOptions(options);
+    if(process.env.GECKODRIVER)builder.setFirefoxService(new firefox.ServiceBuilder(process.env.GECKODRIVER));
+    driver=await builder.build();
+    await driver.manage().window().setRect({width:1400,height:1100});
+    await driver.get('http://127.0.0.1:'+server.address().port);
+    await driver.wait(()=>driver.executeScript('return window.ready||false'),10000);
+    await driver.findElement(By.css('#tab-servers a')).click();
+    await driver.findElement(By.css('#panel-servers details summary')).click();
+    const inputs=await driver.findElements(By.css('#panel-servers details input'));
+    await inputs[0].sendKeys('xbox-doh');
+    await inputs[1].sendKeys('sdns://AgcAAAAAAAAAAAALeGJveC1kbnMucnUKL2Rucy1xdWVyeQ');
+    await driver.findElement(By.xpath('//button[text()="Сохранить кастомный сервер"]')).click();
+    await driver.wait(()=>driver.executeScript('return window.savedReload||false'),3000);
+    const config=await driver.executeScript('return files[Object.keys(files)[0]]');
+    assert.match(config,/\[static\.xbox-doh\]\nstamp = "sdns:\/\/Agc/);
+    assert.ok(config.includes('[sources.public]'));
+    assert.ok(config.includes('&region=eu </textarea>'));
+    assert.equal(await driver.executeScript('return commands.length'),0,'Saving a custom server does not restart DNS');
+    await driver.navigate().refresh();
+    await driver.wait(()=>driver.executeScript('return window.ready||false'),3000);
+    await driver.executeScript('files["/etc/dnscrypt-proxy2/forwarding-rules.txt"]="example.test 127.0.0.1:5300"');
+    await driver.findElement(By.css('#tab-rules a')).click();
+    await driver.findElement(By.xpath('//div[@id="panel-rules"]//button[text()="Загрузить файл"]')).click();
+    await driver.wait(()=>driver.executeScript('return !document.querySelector("#panel-rules textarea").disabled'),3000);
+    await driver.findElement(By.xpath('//div[@id="panel-rules"]//button[text()="Использовать этот файл для инстанса"]')).click();
+    await driver.wait(()=>driver.executeScript('return window.savedReload||false'),3000);
+    const connected=await driver.executeScript('return files[Object.keys(files)[0]]');
+    assert.match(connected,/forwarding_rules = ["']\/etc\/dnscrypt-proxy2\/forwarding-rules\.txt["']/);
+    assert.ok(connected.indexOf('forwarding_rules')<connected.indexOf('[sources.public]'));
+    assert.equal(await driver.executeScript('return commands.length'),0,'Connecting rules does not restart DNS');
+    assert.deepEqual(await driver.executeScript('return errors'),[]);
+    if(process.env.FORGE_SCREENSHOT)fs.writeFileSync(process.env.FORGE_SCREENSHOT,await driver.takeScreenshot(),'base64');
+    console.log('Passed custom DNS and rule connection: preserved unrelated configuration, top-level rule path, no automatic DNS restart');
+  } finally {if(driver)await driver.quit();await new Promise(resolve=>server.close(resolve));}
+}
+main().catch(error=>{console.error(error);process.exitCode=1;});

@@ -5,7 +5,7 @@
 'require poll';
 'require rpc';
 'require ui';
-'require dnscrypt-forge-v013r1 as forge';
+'require dnscrypt-forge-v13r5 as forge';
 
 var CONFIG_FILE, INIT_SCRIPT, selectedInstance, allInstances = [], loadedConfig = '';
 var originalFields = {};
@@ -14,6 +14,9 @@ var actionBusy = false;
 var callInstanceLogs = rpc.declare({
 	object: 'dnscrypt-forge', method: 'logs', params: ['service', 'instance', 'previous_pid'], expect: { '': {} }
 });
+
+var callResolvers=rpc.declare({object:'dnscrypt-forge-files',method:'resolvers',params:['config','all'],expect:{'':{}}});
+function loadResolvers(all){return callResolvers(CONFIG_FILE,all).then(function(result){if(result.error)throw new Error(result.error);if(!Array.isArray(result.servers))throw new Error('Invalid resolver response');return result.servers;});}
 
 function readInstanceOutput(previousPid) {
 	return callInstanceLogs(selectedInstance.service, selectedInstance.instance, previousPid || 0).then(function(result) {
@@ -106,7 +109,7 @@ function control(action) {
 function writeConfig(content) {
 	return fs.read(CONFIG_FILE).then(function(current) {
 		if (current !== loadedConfig) throw new Error(i18n('Configuration changed externally. Reload this page before saving.'));
-		return fs.write(CONFIG_FILE, content);
+		return fileCall('write', CONFIG_FILE, content, current, true);
 	}).then(function() {
 		loadedConfig = content;
 		selectedInstance.listenAddresses = forge.parseToml(content).listen_addresses;
@@ -882,6 +885,231 @@ function renderSelect(name, value, label, options, description) {
 	]);
 }
 
+function editorLabel(en, ru) { return getCurrentLang() === 'ru' ? ru : en; }
+var fileMethods = {};
+['stat', 'read', 'write', 'versions', 'version'].forEach(function(method) {
+  var params = ['config', 'path'];
+  if (method === 'write') params = params.concat(['content', 'expected', 'exists']);
+  if (method === 'version') params.push('id');
+  fileMethods[method] = rpc.declare({object:'dnscrypt-forge-files',method:method,params:params,expect:{'':{}}});
+});
+function fileCall(method, path) {
+  var args = [CONFIG_FILE, path].concat(Array.prototype.slice.call(arguments, 2));
+  return fileMethods[method].apply(null, args).then(function(result) {
+    if (!result || result.error) throw new Error(result && result.error || 'Invalid file response');
+    return result;
+  });
+}
+function editorError(error) { showNotification(null, error.message || String(error), 'error'); }
+function historyEditor(textarea, path, initial) {
+  var states = [{value:initial,start:0,end:0}], index = 0, baseline = initial, busy = false;
+  var undo, redo, count, lastTyping = 0;
+  function refresh() { undo.disabled = index === 0; redo.disabled = index === states.length-1; count.textContent = (index+1)+' / '+states.length; }
+  function record(event) {
+    if (states[index].value === textarea.value) return;
+    var now=Date.now(), previous=states[index];
+    var typing=event && event.inputType==='insertText';
+    var next={value:textarea.value,start:textarea.selectionStart,end:textarea.selectionEnd};
+    var continuous=typing && lastTyping && now-lastTyping<700 && index>0 && index===states.length-1
+      && next.start===next.end && previous.start===previous.end
+      && next.end===previous.end+next.value.length-previous.value.length;
+    lastTyping=typing ? now : 0;
+    if(continuous) {states[index]=next;refresh();return;}
+    states.splice(index+1); states.push(next);
+    if (states.length > 100) states.shift();
+    index = states.length-1; refresh();
+  }
+  function step(delta) {
+    record(); lastTyping=0; var next = index+delta;
+    if (next<0 || next>=states.length) return;
+    index=next; textarea.value=states[index].value;
+    textarea.focus(); textarea.setSelectionRange(states[index].start,states[index].end); refresh();
+  }
+  textarea.addEventListener('input',record);
+  textarea.addEventListener('keydown',function(event) {
+    if (!(event.ctrlKey || event.metaKey)) return;
+    var key=event.key.toLowerCase();
+    if (key==='z' || key==='y') { event.preventDefault(); step(key==='y' || event.shiftKey ? 1 : -1); }
+  });
+  undo=textElement('button',{type:'button',class:'btn',click:function(){step(-1);}},editorLabel('Undo','Назад'));
+  redo=textElement('button',{type:'button',class:'btn',click:function(){step(1);}},editorLabel('Redo','Вперёд'));
+  count=textElement('span',{style:'margin:0 12px'},'');
+  var versions=textElement('button',{type:'button',class:'btn',click:function() {
+    if (busy) return; busy=true;
+    fileCall('versions',path()).then(function(result) {
+      var nodes=[textElement('p',{},editorLabel('Choose a saved version to preview in the editor. Save explicitly to restore it.','Выберите версию для загрузки в редактор. Для восстановления нажмите «Сохранить».'))];
+      (result.versions || []).forEach(function(item) {
+        nodes.push(textElement('button',{type:'button',class:'btn',style:'display:block;margin:8px 0',click:function() {
+          fileCall('version',path(),item.id).then(function(saved) {
+            textarea.value=saved.content; record(); ui.hideModal();
+          }).catch(editorError);
+        }},new Date(item.time*1000).toLocaleString()+' · '+item.id));
+      });
+      if (!(result.versions || []).length) nodes.push(textElement('p',{},editorLabel('No saved versions yet. Previous contents are saved before each write.','Версий пока нет. Предыдущее содержимое сохраняется перед каждой записью.')));
+      nodes.push(textElement('button',{type:'button',class:'btn',click:function(){ui.hideModal();}},i18n('Close')));
+      ui.showModal(editorLabel('Saved versions (last 10)','Сохранённые версии (последние 10)'),nodes);
+    }).catch(editorError).finally(function(){busy=false;});
+  }},editorLabel('Saved versions','Сохранённые версии'));
+  refresh();
+  return {toolbar:textElement('div',{style:'display:flex;gap:8px;align-items:center;margin:10px 0;flex-wrap:wrap'},[undo,redo,count,versions]),
+    dirty:function(){return textarea.value!==baseline;},
+    reset:function(value){lastTyping=0;baseline=value;textarea.value=value;states=[{value:value,start:0,end:0}];index=0;refresh();},
+    saved:function(value){lastTyping=0;baseline=value;}, record:record};
+}
+function sectionValue(content, section, key) {
+  var current='', result;
+  content.split('\n').forEach(function(line) {
+    var header=line.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/);
+    if (header) current=header[1];
+    if (current===section && new RegExp('^\\s*'+key+'\\s*=').test(line)) result=forge.parseToml(line)[key];
+  });
+  return result;
+}
+function sectionUpdate(content, section, key, value) {
+  if (!section) { var updates={};updates[key]=value;return forge.updateToml(content,updates); }
+  var lines=content.split('\n'), start=-1, end=lines.length;
+  for (var i=0;i<lines.length;i++) {
+    var header=lines[i].match(/^\s*\[([^\]]+)\]/);
+    if (header && start>=0) {end=i;break;}
+    if (header && header[1]===section) start=i;
+  }
+  var assignment=key+' = '+JSON.stringify(value);
+  if (start<0) return content.replace(/\s*$/,'')+'\n\n['+section+']\n'+assignment+'\n';
+  for (var j=start+1;j<end;j++) if (new RegExp('^\\s*'+key+'\\s*=').test(lines[j])) {lines[j]=assignment;return lines.join('\n');}
+  lines.splice(end,0,assignment);return lines.join('\n');
+}
+function commitEditorConfig(content) {
+  var fields=snapshotFields(document.getElementById('dnscrypt-proxy-form'));
+  var raw=document.getElementById('config-textarea');
+  if ((Object.keys(fields).some(function(key){return fields[key]!==originalFields[key];}) || raw && raw.value!==loadedConfig || activeFileEditors.some(function(editor){return editor.dirty();}))
+    && !window.confirm(i18n('Discard unsaved changes?'))) return Promise.resolve(false);
+  return writeConfig(content).then(function(){window.location.reload();return true;});
+}
+function staticServersPanel() {
+  var name=textElement('input',{type:'text',placeholder:editorLabel('Server name','Имя сервера'),style:'width:220px'});
+  var stamp=textElement('input',{type:'text',placeholder:'sdns://...',style:'width:100%;font-family:monospace'});
+  var list=textElement('div',{}), existing=[];
+  loadedConfig.split('\n').forEach(function(line) {
+    var match=line.match(/^\s*\[static\.([A-Za-z0-9_-]+)\]\s*(?:#.*)?$/);
+    if (!match) return;
+    var server=match[1], value=sectionValue(loadedConfig,'static.'+server,'stamp') || '';
+    existing.push({name:server,stamp:value});
+    list.appendChild(textElement('div',{style:'margin:8px 0'},[
+      textElement('strong',{},server+' '),textElement('code',{style:'display:block;overflow-wrap:anywhere;margin:6px 0'},value),textElement('button',{type:'button',class:'btn',click:function(){selection.value=server;name.value=server;stamp.value=value;}},editorLabel('Edit','Изменить')),
+      textElement('button',{type:'button',class:'btn',style:'margin-left:8px',click:function() {
+        if (!window.confirm(editorLabel('Remove this custom server?','Удалить этот кастомный сервер?'))) return;
+        var lines=loadedConfig.split('\n'), removing=false;
+        var content=lines.filter(function(text) {
+          var h=text.match(/^\s*\[([^\]]+)\]/);
+          if(h) removing=h[1]==='static.'+server;
+          return !removing;
+        }).join('\n');
+        var servers=forge.parseToml(content).server_names;
+        if(Array.isArray(servers)) content=forge.updateToml(content,{server_names:servers.filter(function(item){return item!==server;})});
+        commitEditorConfig(content).catch(editorError);
+      }},editorLabel('Remove','Удалить'))
+    ]));
+  });
+  var selection=textElement('select',{id:'custom-server-selection',change:function(){
+    var found=existing.filter(function(item){return item.name===selection.value;})[0];
+    name.value=found?found.name:'';stamp.value=found?found.stamp:'';
+  }},existing.map(function(item){return textElement('option',{value:item.name},item.name);}).concat([textElement('option',{value:''},editorLabel('Add new server','Добавить новый сервер'))]));
+  if(existing.length) {name.value=existing[0].name;stamp.value=existing[0].stamp;}
+  return textElement('details',{id:'custom-servers',style:'margin-top:20px',open:existing.length?'open':null},[
+    textElement('summary',{style:'cursor:pointer;font-weight:bold'},editorLabel('Custom servers (DNS stamps)','Кастомные серверы (DNS stamps)')),
+    textElement('p',{},editorLabel('Add or edit a static server, then select its name in Server Names. Saving does not restart DNS.','Добавьте или измените сервер, затем выберите его имя в Server Names. Сохранение не перезапускает DNS.')),
+    list,selection,textElement('p',{},editorLabel('Selected server name and saved DNS stamp:','Имя выбранного сервера и сохранённый DNS stamp:')),name,stamp,textElement('button',{type:'button',class:'btn',style:'margin-top:10px',click:function() {
+      if(!/^[A-Za-z0-9_-]{1,64}$/.test(name.value) || !/^sdns:\/\/[A-Za-z0-9_-]+$/.test(stamp.value)) {editorError(new Error(editorLabel('Enter a valid name and DNS stamp.','Укажите корректное имя и DNS stamp.')));return;}
+      commitEditorConfig(sectionUpdate(loadedConfig,'static.'+name.value,'stamp',stamp.value)).catch(editorError);
+    }},editorLabel('Save custom server','Сохранить кастомный сервер'))
+  ]);
+}
+var ruleKinds = [
+ ['forwarding','', 'forwarding_rules','forwarding-rules.txt','Forwarding','Перенаправление DNS'],
+ ['cloaking','', 'cloaking_rules','cloaking-rules.txt','Cloaking','Собственные DNS-записи'],
+ ['blocked_names','blocked_names','blocked_names_file','blocked-names.txt','Blocked domains','Блокировка доменов'],
+ ['blocked_ips','blocked_ips','blocked_ips_file','blocked-ips.txt','Blocked IPs','Блокировка IP'],
+ ['allowed_names','allowed_names','allowed_names_file','allowed-names.txt','Allowed domains','Исключения доменов'],
+ ['allowed_ips','allowed_ips','allowed_ips_file','allowed-ips.txt','Allowed IPs','Исключения IP'],
+ ['captive','captive_portals','map_file','captive-portals.txt','Captive portals','Captive portals']
+];
+var activeFileEditors=[];
+function ruleEditorPanel(kinds) {
+  var entries=ruleKinds.filter(function(item){return kinds.indexOf(item[0])>=0;}), kind=entries[0], expected='', exists=false, currentPath='', ready=false, busy=false;
+  var selection=textElement('select',{},entries.map(function(item){return textElement('option',{value:item[0]},editorLabel(item[4],item[5]));}));
+  var path=textElement('input',{type:'text',style:'width:100%;font-family:monospace'});
+  var enabled=textElement('input',{type:'checkbox',disabled:true,class:'rules-enabled'});
+  var enabledLabel=textElement('span',{});
+  var status=textElement('p',{}), connection=textElement('p',{class:'rule-connection'}), connectButton, disconnectButton;
+  function connectionStatus() {
+    var configured=sectionValue(loadedConfig,kind[1],kind[2]);
+    var absolute=configured && (configured.charAt(0)==='/'?configured:CONFIG_FILE.replace(/[^/]+$/,'')+configured);
+    var same=!!absolute && absolute===path.value;
+    enabled.checked=!!absolute;
+    enabledLabel.textContent=absolute?editorLabel('Enabled in TOML','Включено в TOML'):editorLabel('Disabled in TOML','Выключено в TOML');
+    connection.textContent=same?editorLabel('This file is already used by the selected instance. Save edits; no need to enable it again.','Этот файл уже используется выбранным инстансом. Сохраните правки; повторно включать его не нужно.'):
+      editorLabel('This file is not used by the selected instance. Configured file: ','Этот файл не используется выбранным инстансом. Файл в конфигурации: ')+(absolute || editorLabel('none','не задан'));
+    if(connectButton)connectButton.disabled=same;
+    if(disconnectButton)disconnectButton.disabled=!absolute;
+  }
+  var textarea=textElement('textarea',{style:'width:100%;min-height:300px;font-family:monospace;box-sizing:border-box',spellcheck:false,disabled:true},'');
+  var editor=historyEditor(textarea,function(){return currentPath || path.value;},'');
+  activeFileEditors.push(editor);
+  function choose() {
+    var file=sectionValue(loadedConfig,kind[1],kind[2]) || kind[3];
+    path.value=file.charAt(0)==='/'?file:CONFIG_FILE.replace(/[^/]+$/,'')+file;
+    ready=false;textarea.disabled=true;editor.reset('');connectionStatus();
+    status.textContent=editorLabel('Load the file before editing. Files must be .txt or .overall under /etc/dnscrypt-proxy2/, up to 1024 KiB.','Загрузите файл перед правкой. Поддерживаются .txt и .overall внутри /etc/dnscrypt-proxy2/, до 1024 КиБ.');
+  }
+  selection.addEventListener('change',function(){
+    if(editor.dirty() && !window.confirm(i18n('Discard unsaved changes?'))) {selection.value=kind[0];return;}
+    kind=entries.filter(function(item){return item[0]===selection.value;})[0];choose();
+  });
+  path.addEventListener('input',connectionStatus);
+  choose();
+  function run(action) {if(busy)return;busy=true;Promise.resolve().then(action).catch(editorError).finally(function(){busy=false;});}
+  var panel=textElement('div',{},[
+    textElement('table',{class:'table rule-settings'},entries.map(function(item){var configured=sectionValue(loadedConfig,item[1],item[2]);return textElement('tr',{},[textElement('td',{},editorLabel(item[4],item[5])),textElement('td',{},[textElement('input',{type:'checkbox',disabled:true,checked:configured?'checked':null}),editorLabel(configured?'Enabled':'Disabled',configured?'Включено':'Выключено')]),textElement('td',{style:'overflow-wrap:anywhere'},configured || '—')]);})),
+    selection,textElement('label',{style:'display:block;margin:10px 0'},[enabled,enabledLabel]),path,connection,textElement('p',{},editorLabel('Save edits the file. Use this file changes the TOML reference; Stop using rules removes that reference and keeps the file. Restart DNS separately to apply changes.','Сохранить — записать правки в файл. Использовать этот файл — указать его путь в TOML. Не использовать правила — убрать ссылку, сохранив сам файл. Изменения применяются после отдельного перезапуска DNS.')),status,
+    textElement('div',{style:'display:flex;gap:8px;flex-wrap:wrap'},[
+      textElement('button',{type:'button',class:'btn',click:function(){run(function(){
+        if(editor.dirty() && !window.confirm(i18n('Discard unsaved changes?')))return;
+        var requestedPath=path.value;
+        status.textContent=editorLabel('Checking file size…','Проверяю размер файла…');
+        return fileCall('stat',requestedPath).then(function(info){
+          if(!info.editable) {
+            ready=false;textarea.disabled=true;editor.reset('');
+            status.textContent=editorLabel('Not loaded: ','Файл не загружен: ')+(info.size/1048576).toFixed(2)+' MiB. '+editorLabel('The web editor limit is 1024 KiB. Edit this file manually over SSH; its existing TOML reference is kept.','Лимит веб-редактора — 1024 КиБ. Правьте этот файл вручную через SSH; ссылка в TOML сохраняется.');
+            throw new Error(status.textContent);
+          }
+          if(path.value!==requestedPath)throw new Error(editorLabel('File path changed; load it again.','Путь изменился; загрузите файл заново.'));
+          return fileCall('read',requestedPath);
+        }).then(function(result){currentPath=path.value;expected=result.content;exists=result.exists;ready=true;textarea.disabled=false;editor.reset(expected);
+          status.textContent=exists?editorLabel('Loaded. Save writes the file; restart the service separately.','Загружен. Сохранение записывает файл; перезапуск выполняется отдельно.'):editorLabel('New file: enter rules and save, then connect it to the configuration.','Новый файл: добавьте правила, сохраните, затем подключите к конфигурации.');
+          return Promise.all(allInstances.map(function(instance){return fs.read(instance.config).then(function(content){var linked=sectionValue(content,kind[1],kind[2]);if(linked && linked.charAt(0)!=='/')linked=instance.config.replace(/[^/]+$/,'')+linked;return linked===currentPath?instance.id:null;}).catch(function(){return null;});})).then(function(shared){shared=shared.filter(Boolean);if(shared.length>1)status.textContent+=' '+editorLabel('Shared by: ','Общий для: ')+shared.join(', ');});
+        });
+      });}},editorLabel('Load file','Загрузить файл')),
+      textElement('button',{type:'button',class:'btn',click:function(){run(function(){
+        if(!ready || currentPath!==path.value)throw new Error(editorLabel('Load this file first.','Сначала загрузите этот файл.'));
+        var value=textarea.value;
+        return fileCall('write',currentPath,value,expected,exists).then(function(){expected=value;exists=true;editor.saved(value);status.textContent=editorLabel('Saved. Previous contents are in Saved versions.','Сохранено. Предыдущее содержимое доступно в сохранённых версиях.');});
+      });}},i18n('Save')),
+      connectButton=textElement('button',{type:'button',class:'btn',click:function(){run(function(){
+        if(!ready || currentPath!==path.value || !exists || editor.dirty())throw new Error(editorLabel('Load and save the file first.','Сначала загрузите и сохраните файл.'));
+        return commitEditorConfig(sectionUpdate(loadedConfig,kind[1],kind[2],currentPath));
+      });}},editorLabel('Use this file for this instance','Использовать этот файл для инстанса')),
+      disconnectButton=textElement('button',{type:'button',class:'btn',click:function(){run(function(){
+        if(!window.confirm(editorLabel('Stop using these rules for this instance? The file is kept.','Не использовать эти правила для инстанса? Сам файл останется.')))return;
+        var content=loadedConfig;
+        if(!kind[1]) content=forge.updateToml(content,(function(){var x={};x[kind[2]]=null;return x;})());
+        else content=sectionUpdate(content,kind[1],kind[2],'');
+        return commitEditorConfig(content);
+      });}},editorLabel('Stop using these rules','Не использовать эти правила'))
+    ]),editor.toolbar,textarea
+  ]);
+  connectionStatus();return panel;
+}
+
 return view.extend({
 	load: function() {
 		var self = this;
@@ -938,6 +1166,7 @@ return view.extend({
 	
 	saveConfig: function() {
 		var self = this;
+        if (activeFileEditors.some(function(editor){return editor.dirty();})) return Promise.reject(new Error(editorLabel('Save or discard rule-file edits first.','Сначала сохраните или отмените правки файла правил.')));
 		var raw = document.getElementById('config-textarea');
 		if (raw && raw.value !== self.configContent) return Promise.reject(new Error(i18n('Save raw edits with the Save button in the Configuration tab.')));
 		
@@ -1110,34 +1339,35 @@ return view.extend({
 			}, [i18n('Restart')])
 		]);
 		
-		var tabs = [
-			{ id: 'general', label: i18n('General') },
-			{ id: 'servers', label: i18n('Servers') },
-			{ id: 'connection', label: i18n('Connection') },
-			{ id: 'network', label: i18n('Network') },
-			{ id: 'balancing', label: i18n('Load Balancing') },
-			{ id: 'caching', label: i18n('Caching') },
-			{ id: 'filters', label: i18n('Filters') },
-			{ id: 'certs', label: i18n('Certificates') },
-			{ id: 'logging', label: i18n('Logging') },
-			{ id: 'config_view', label: i18n('Configuration') }
-		];
-		
+        activeFileEditors=[];
+        var tabs = [
+            {id:'general',label:i18n('General')},{id:'servers',label:i18n('Servers')},
+            {id:'catalog',label:editorLabel('Resolver catalog','Каталог DNS')},{id:'network',label:i18n('Network')},
+            {id:'filters',label:i18n('Filters')},{id:'rules',label:editorLabel('Rules','Правила')},
+            {id:'logging',label:i18n('Logging')},{id:'config_view',label:i18n('Configuration')},
+            {id:'advanced',label:editorLabel('Advanced','Расширенные')}
+        ];
+
 		var tabContent = {};
 		var commented = config._commented || {};
 		
 		// Server selection button
-		var selectServerButton = textElement('button', {
-			type: 'button',
-			class: 'btn cbi-button cbi-button-action',
-			style: 'margin-left:10px',
-			click: function() {
+        function confirmServerSelection(input, selected, inline) {
+            input.value=selected.join(',');
+            input.dispatchEvent(new Event('input',{bubbles:true}));
+            var message=editorLabel('Server selection updated: ','Выбор серверов обновлён: ')+selected.length+'. '+
+                (selected.length?selected.join(', '):editorLabel('Selection cleared.','Выбор очищен.'))+' '+
+                editorLabel('Settings are not saved yet. Click Save or Save & Apply to keep this selection.','Настройки ещё не сохранены. Нажмите Сохранить или Сохранить и применить, чтобы сохранить выбор.');
+            if(inline) document.getElementById('catalog-selection-feedback').textContent=message;
+            else showNotification(null,message,'info');
+        }
+		function openServerSelector(inline) {
 				// Get current selected servers
 				var currentInput = document.querySelector('#dnscrypt-proxy-form input[name="server_names"]');
 				var currentServers = currentInput ? currentInput.value.split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s; }) : [];
 				
 				// Use LuCI's showModal
-				var closeModal = ui.showModal(i18n('Available Servers'), [
+				var selectorNodes = [
 					textElement('p', { class: 'cbi-section-descr' }, i18n('Search by name or address')),
 					textElement('input', {
 						type: 'text',
@@ -1176,42 +1406,31 @@ return view.extend({
 											if (name) selected.push(name);
 										}
 									});
-									input.value = selected.join(',');
+									confirmServerSelection(input,selected,inline);
 								}
-								ui.hideModal();
+								if(!inline) ui.hideModal();
 							}
 						}, i18n('Add to list')),
 						textElement('button', {
 							type: 'button',
 							class: 'btn cbi-button cbi-button-negative',
 							click: function() {
-								ui.hideModal();
+								if(inline) document.getElementById('catalog-results').replaceChildren();else ui.hideModal();
 							}
 						}, i18n('Close'))
 					])
-				]);
+				];
+                if(inline) selectorNodes.push(textElement('p',{id:'catalog-selection-feedback',role:'status','aria-live':'polite',style:'margin-top:12px;font-weight:bold;overflow-wrap:anywhere;max-height:120px;overflow:auto'},''));
+                if(inline) document.getElementById('catalog-results').replaceChildren.apply(document.getElementById('catalog-results'),selectorNodes);
+                else ui.showModal(i18n('Available Servers'),selectorNodes);
 
 				// Load servers using fs.exec
-				checkedExec('/usr/sbin/dnscrypt-proxy', ['-config', CONFIG_FILE, '-list', '-json']).then(function(result) {
+				loadResolvers(inline).then(function(result) {
 					var serverList = document.getElementById('server-list-modal');
 					if (!serverList) return;
 					
 					// Parse JSON from stdout
-					var servers = [];
-					try {
-						var output = result.stdout;
-						if (output) {
-							// Find JSON array in output
-							var start = output.indexOf('[');
-							var end = output.lastIndexOf(']') + 1;
-							if (start >= 0 && end > start) {
-								var jsonStr = output.substring(start, end);
-								servers = JSON.parse(jsonStr);
-							}
-						}
-					} catch (e) {
-						console.error('Parse error:', e);
-					}
+					var servers = result;
 					
 					if (servers.length === 0) {
 						serverList.replaceChildren(textElement('div', { style: 'padding:20px;text-align:center;color:red' }, i18n('Error loading servers')));
@@ -1287,8 +1506,8 @@ return view.extend({
 							i18n('Error loading servers') + ': ' + (err.message || JSON.stringify(err))));
 					}
 				});
-			}
-		}, [i18n('Select Server')]);
+		}
+		var selectServerButton=textElement('button',{type:'button',class:'btn',click:function(){openServerSelector(false);}},[i18n('Select Server')]);
 		
 		// Disabled servers selection button
 		var selectDisabledServerButton = textElement('button', {
@@ -1340,7 +1559,7 @@ return view.extend({
 											if (name) selected.push(name);
 										}
 									});
-									input.value = selected.join(',');
+									confirmServerSelection(input,selected,false);
 								}
 								ui.hideModal();
 							}
@@ -1356,25 +1575,12 @@ return view.extend({
 				]);
 
 				// Load servers using fs.exec
-				checkedExec('/usr/sbin/dnscrypt-proxy', ['-config', CONFIG_FILE, '-list', '-json']).then(function(result) {
+				loadResolvers(false).then(function(result) {
 					var serverList = document.getElementById('server-list-modal-disabled');
 					if (!serverList) return;
 					
 					// Parse JSON from stdout
-					var servers = [];
-					try {
-						var output = result.stdout;
-						if (output) {
-							var start = output.indexOf('[');
-							var end = output.lastIndexOf(']') + 1;
-							if (start >= 0 && end > start) {
-								var jsonStr = output.substring(start, end);
-								servers = JSON.parse(jsonStr);
-							}
-						}
-					} catch (e) {
-						console.error('Parse error:', e);
-					}
+					var servers = result;
 					
 					if (servers.length === 0) {
 						serverList.replaceChildren(textElement('div', { style: 'padding:20px;text-align:center;color:red' }, i18n('Error loading servers')));
@@ -1630,19 +1836,19 @@ return view.extend({
 							var container = document.getElementById('config-view-content');
 							var textarea = container.querySelector('textarea');
 							if (textarea) {
-								textarea.value = i18n('Loading...');
+								if (textarea.value !== loadedConfig && !window.confirm(i18n('Discard unsaved changes?'))) return;
 							}
 							fs.read(CONFIG_FILE).then(function(content) {
 								var container = document.getElementById('config-view-content');
 								var textarea = container.querySelector('textarea');
 								if (textarea) {
-									textarea.value = content;
+									configUndo.reset(content); loadedConfig=content; self.configContent=content;
 								}
 							}).catch(function(e) {
 								var container = document.getElementById('config-view-content');
 								var textarea = container.querySelector('textarea');
 								if (textarea) {
-									textarea.value = i18n('Error') + ': ' + e.message;
+									editorError(e);
 								}
 							});
 						}
@@ -1657,7 +1863,7 @@ return view.extend({
 							var textarea = container.querySelector('textarea');
 							if (textarea) {
 								var fields = snapshotFields(document.getElementById('dnscrypt-proxy-form'));
-								if (Object.keys(fields).some(function(key) { return fields[key] !== originalFields[key]; }) && !window.confirm(i18n('Discard unsaved changes?'))) return;
+								if ((Object.keys(fields).some(function(key) { return fields[key] !== originalFields[key]; }) || activeFileEditors.some(function(editor){return editor.dirty();})) && !window.confirm(i18n('Discard unsaved changes?'))) return;
 								var content = textarea.value;
 								writeConfig(content).then(function() {
 									window.location.reload();
@@ -1678,6 +1884,51 @@ return view.extend({
 			])
 		]);
 		
+        var networkSettings=tabContent.network;
+        tabContent.network=textElement('div',{},[
+            textElement('h4',{},i18n('Connection')),tabContent.connection,
+            textElement('h4',{},i18n('Network')),networkSettings
+        ]);
+        var sourceRows=[];
+        loadedConfig.split('\n').forEach(function(line){
+            var header=line.match(/^\s*\[(sources\.[^\]]+)\]\s*(?:#.*)?$/);
+            if(!header)return;
+            var section=header[1], cache=sectionValue(loadedConfig,section,'cache_file');
+            if(!cache)return;
+            var delay=sectionValue(loadedConfig,section,'refresh_delay');
+            var absolute=cache.charAt(0)==='/'?cache:CONFIG_FILE.replace(/[^/]+$/,'')+cache;
+            sourceRows.push(textElement('tr',{},[
+                textElement('td',{},section.slice(8).replace(/^['"]|['"]$/g,'')),
+                textElement('td',{style:'overflow-wrap:anywhere'},absolute),
+                textElement('td',{},delay==null?editorLabel('Default','По умолчанию'):String(delay)+' h')
+            ]));
+        });
+        tabContent.catalog=textElement('div',{},[
+            textElement('p',{},editorLabel('public-resolvers.md is a cached resolver catalog, not a blocking list. DNSCrypt downloads and verifies source updates when their refresh interval expires.','public-resolvers.md — кеш каталога DNS-серверов, а не список блокировки. DNSCrypt загружает и проверяет обновления источников по истечении интервала обновления.')),
+            textElement('table',{class:'table'},[textElement('tr',{},[
+                textElement('th',{},editorLabel('Source','Источник')),textElement('th',{},editorLabel('Cached catalog','Файл каталога')),textElement('th',{},editorLabel('Refresh interval','Интервал обновления'))
+            ])].concat(sourceRows)),
+            sourceRows.length?null:textElement('p',{},editorLabel('No catalog sources configured. Custom static resolvers are available in Servers.','Источники каталога не настроены. Кастомные DNS доступны во вкладке Серверы.')),
+            textElement('p',{},editorLabel('Reload and choose reads the catalog through DNSCrypt including servers excluded by the saved protocol/privacy filters. It refreshes expired sources, without forcing a fresh download or restarting DNS. Choices go into General → Server Names; save settings to keep them and ensure the chosen protocol is enabled in Servers.','Перезагрузить список и выбрать — прочитать каталог через DNSCrypt включая серверы, исключённые сохранёнными фильтрами протоколов и приватности. Просроченные источники обновляются; принудительной загрузки и перезапуска DNS нет. Выбор попадает в Основные → Имена серверов; сохраните настройки и убедитесь, что протокол выбранного DNS включён во вкладке Серверы.')),
+            textElement('button',{type:'button',class:'btn',id:'catalog-select',click:function(){openServerSelector(true);}},editorLabel('Load available servers','Показать доступные DNS-серверы')),
+            textElement('div',{id:'catalog-results',style:'margin-top:16px'})
+        ].filter(function(node){return node!==null;}));
+        tabContent.servers.appendChild(staticServersPanel());
+        tabContent.filters.appendChild(textElement('details',{},[
+            textElement('summary',{style:'cursor:pointer;font-weight:bold'},editorLabel('Blocklists and exceptions','Блок-листы и исключения')),
+            ruleEditorPanel(['blocked_names','blocked_ips','allowed_names','allowed_ips'])
+        ]));
+        tabContent.rules=ruleEditorPanel(['forwarding','cloaking']);
+        tabContent.advanced=textElement('div',{},['balancing','caching','certs'].map(function(id){
+            return textElement('details',{id:'advanced-'+id,style:'margin-bottom:16px'},[
+                textElement('summary',{style:'cursor:pointer;font-weight:bold'},i18n({connection:'Connection',network:'Network',balancing:'Load Balancing',caching:'Caching',certs:'Certificates'}[id])),tabContent[id]
+            ]);
+        }));
+        tabContent.advanced.appendChild(textElement('details',{},[textElement('summary',{style:'cursor:pointer;font-weight:bold'},'Captive portals'),ruleEditorPanel(['captive'])]));
+        var configArea=tabContent.config_view.querySelector('textarea');
+        var configUndo=historyEditor(configArea,function(){return CONFIG_FILE;},this.configContent);
+        configArea.parentNode.insertBefore(configUndo.toolbar,configArea);
+
 		// Build tabs
 		var tabHeaders = textElement('ul', { class: 'cbi-tabmenu' });
 		var tabBodies = [];
@@ -1720,7 +1971,7 @@ return view.extend({
 				var dirty = Object.keys(fields).some(function(key) { return fields[key] !== originalFields[key]; });
 				var raw = document.getElementById('config-textarea');
 				dirty = dirty || (raw && raw.value !== loadedConfig);
-				if (dirty && !window.confirm(i18n('Discard unsaved changes?'))) {
+				if ((dirty || activeFileEditors.some(function(editor){return editor.dirty();})) && !window.confirm(i18n('Discard unsaved changes?'))) {
 					event.target.value = selectedInstance.id;
 					return;
 				}
@@ -1753,6 +2004,7 @@ return view.extend({
 			submit: ui.createHandlerFn(this, 'handleSave')
 		}, [
 			textElement('h2', {}, 'DNSCrypt-Proxy 2 Forge'),
+            textElement('p',{id:'forge-version'},[editorLabel('Version: ','Версия: '),'1.3-r5 · ',textElement('a',{href:'https://github.com/numbereleven-a/luci-app-dnscrypt-proxy2_forge',target:'_blank',rel:'noopener noreferrer'},'GitHub')]),
 			instancePanel,
 			statusSection,
 			controlSection,
@@ -1768,8 +2020,8 @@ return view.extend({
 		]);
 		
 		// Tab switching
-		setTimeout(function() {
-			var tabList = document.querySelectorAll('#dnscrypt-proxy-form .cbi-tabmenu li');
+		(function() {
+			var tabList = tabHeaders.querySelectorAll('li');
 			tabList.forEach(function(li) {
 				li.style.cursor = 'pointer';
 				li.onclick = function(e) {
@@ -1791,7 +2043,7 @@ return view.extend({
 					});
 				};
 			});
-		}, 200);
+		})();
 		
 		// Polling for status and servers
 		setTimeout(function() {

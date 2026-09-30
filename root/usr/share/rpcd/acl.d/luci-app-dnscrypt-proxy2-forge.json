@@ -16,6 +16,13 @@
         ],
         "dnscrypt-forge": [
           "logs"
+        ],
+        "dnscrypt-forge-files": [
+          "read",
+          "versions",
+          "version",
+          "stat",
+          "resolvers"
         ]
       },
       "file": {
@@ -41,14 +48,14 @@
         "file": [
           "exec",
           "write"
+        ],
+        "dnscrypt-forge-files": [
+          "write"
         ]
       },
       "file": {
         "/etc/dnscrypt-proxy2/*.toml": [
           "write"
-        ],
-        "/usr/sbin/dnscrypt-proxy -config /etc/dnscrypt-proxy2/*.toml -list -json": [
-          "exec"
         ],
         "/etc/init.d/dnscrypt-proxy* start": [
           "exec"
