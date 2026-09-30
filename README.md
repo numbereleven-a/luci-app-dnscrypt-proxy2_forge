@@ -6,7 +6,7 @@ A LuCI interface for DNSCrypt-Proxy 2 with **multiple instance support**, **deta
 
 Based on [ewgen198409/luci-app-dnscrypt-proxy2](https://github.com/ewgen198409/luci-app-dnscrypt-proxy2), upstream revision [`b9978fe`](https://github.com/ewgen198409/luci-app-dnscrypt-proxy2/tree/b9978fe2f448e8fb7a6aaa03762f97f1c293daba). Forge retains the original settings tabs, resolver selection, TOML editor, and English/Russian interface, and extends them for separate DNSCrypt services.
 
-Current version: **0.1.3-r1**. Tested on **OpenWrt 24.10.1**, **GL.iNet GL-MT6000**, mediatek/filogic, aarch64_cortex-a53. A separate **APK build for OpenWrt 25.12.5** is available; its package contents are verified, but router runtime testing is pending.
+Current version: **0.1.3-r1**. Tested on **OpenWrt 24.10.1**, **GL.iNet GL-MT6000**, mediatek/filogic, aarch64_cortex-a53. Installation and correct operation on **OpenWrt 23.05.5** have also been confirmed by a user. A separate **APK build for OpenWrt 25.12.5** is available; its package contents are verified, but router runtime testing is pending.
 
 ![Instance overview and service operation output](docs/images/overview.jpg)
 
@@ -73,7 +73,7 @@ Select an instance before editing or using the service buttons.
 
 - Runtime tested: OpenWrt **24.10.1**, GL-MT6000, mediatek/filogic, aarch64_cortex-a53.
 - Build and payload verified: OpenWrt **25.12.5**, same target. Runtime testing on that release is pending.
-- OpenWrt **23.05.5** has the required dependencies and LuCI APIs, so the architecture-independent IPK is expected to install. Installation and runtime behavior on that release have not been tested.
+- User tested: installation and correct operation on OpenWrt **23.05.5** using the existing architecture-independent IPK. The device model and detailed test coverage were not specified.
 - Services must be named `dnscrypt-proxy*`, with TOML files under `/etc/dnscrypt-proxy2/`.
 - Separate services can be controlled independently. If multiple procd instances share one init service, their settings remain accessible, but service actions are disabled because they could affect every instance in that service.
 - Stopped services with dynamically computed configuration paths are not discovered by executing their init scripts.
