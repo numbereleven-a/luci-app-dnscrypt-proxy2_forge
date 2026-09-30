@@ -8,7 +8,7 @@ Based on [ewgen198409/luci-app-dnscrypt-proxy2](https://github.com/ewgen198409/l
 
 Current version: **1.3-r5**. Tested on **OpenWrt 24.10.1**, **GL.iNet GL-MT6000**, mediatek/filogic, aarch64_cortex-a53. Installation and correct operation of the earlier **0.1.3-r1** IPK on **OpenWrt 23.05.5** have also been verified. A separate **APK build for OpenWrt 25.12.5** is available; its package contents are verified, but router runtime testing is pending.
 
-![Instance overview and service operation output](docs/images/overview.jpg)
+![Instance overview, service operation output and rule-file editor](docs/images/overview.jpg)
 
 *Interface preview with example instances and synthetic startup output.*
 
