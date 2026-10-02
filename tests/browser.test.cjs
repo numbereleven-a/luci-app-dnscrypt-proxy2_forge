@@ -7,8 +7,8 @@ const moduleRoot = process.env.SELENIUM_MODULE_ROOT || 'selenium-webdriver';
 const {Builder, By, until} = require(moduleRoot);
 const firefox = require(moduleRoot + '/firefox');
 const root = path.resolve(__dirname, '..');
-const helper = fs.readFileSync(path.join(root, 'htdocs/luci-static/resources/dnscrypt-forge-v13r6.js'), 'utf8');
-const view = fs.readFileSync(path.join(root, 'htdocs/luci-static/resources/view/dnscrypt-proxy2-forge/dnscrypt-proxy2-v13r6.js'), 'utf8');
+const helper = fs.readFileSync(path.join(root, 'htdocs/luci-static/resources/dnscrypt-forge-v13r8.js'), 'utf8');
+const view = fs.readFileSync(path.join(root, 'htdocs/luci-static/resources/view/dnscrypt-proxy2-forge/dnscrypt-proxy2-v13r8.js'), 'utf8');
 const resolverParser = "function parseResolverList(output) {\n  for(var start=output.indexOf('[');start>=0;start=output.indexOf('[',start+1)) {\n    var depth=0, quoted=false, escaped=false;\n    for(var i=start;i<output.length;i++) {\n      var ch=output.charAt(i);\n      if(quoted) {if(escaped)escaped=false;else if(ch==='\\\\')escaped=true;else if(ch==='\"')quoted=false;continue;}\n      if(ch==='\"'){quoted=true;continue;}\n      if(ch==='[')depth++;\n      if(ch===']' && --depth===0) {\n        try {var value=JSON.parse(output.slice(start,i+1));\n          if(Array.isArray(value) && value.every(function(item){return item && typeof item.name==='string';}))return value;\n        } catch(error) {}\n        break;\n      }\n    }\n  }\n  throw new Error(editorLabel('DNSCrypt returned no readable resolver list. Check the configured sources and operation output.','DNSCrypt не вернул читаемый список DNS. Проверьте настроенные источники и вывод операций.'));\n}\n";
 const hostileComment = '# literal &amp; ?a=1&region=eu </textarea><img src=x onerror="window.htmlInjected=true">\n';
 const fixture = `<!doctype html><html><meta charset="utf-8"><title>Forge interface test</title>
@@ -20,6 +20,7 @@ const primary='/etc/dnscrypt-proxy2/dnscrypt-proxy.toml', backup='/etc/dnscrypt-
 window.files={ [primary]: "server_names = ['resolver-a']\\nlisten_addresses = ['127.0.0.1:5300']\\ncache_min_ttl = 0\\n[sources.public]\\ncache_file = 'resolvers.md'\\n", [backup]: "server_names = ['resolver-b']\\nlisten_addresses = ['127.0.0.1:5400']\\nlog_file = 'backup.log'\\n[sources.public]\\ncache_file = 'resolvers.md'\\n" };
 files[primary] += ${JSON.stringify(hostileComment)};
 window.originalFiles=Object.assign({},files);window.writes=[];window.commands=[];window.reads=[];
+window.bootEnabled=JSON.parse(sessionStorage.getItem('bootEnabled') || '{"dnscrypt-proxy":true,"dnscrypt-proxy-backup":false}');
 const services={};['dnscrypt-proxy','dnscrypt-proxy-backup'].forEach((name,i)=>services[name]={instances:{instance1:{running:true,command:['/usr/sbin/dnscrypt-proxy','-config',i?backup:primary]}}});
 function E(tag,attrs,children){
  if(!(attrs instanceof Object)||Array.isArray(attrs)){children=attrs;attrs=null;}
@@ -28,8 +29,8 @@ function E(tag,attrs,children){
  else if(children instanceof Node)el.appendChild(children);else if(children!=null)el.innerHTML=String(children);
  return el;
 }
-const apiFs={read:async file=>{reads.push(file);if(file.startsWith('/etc/init.d/'))return 'PROG=/usr/sbin/dnscrypt-proxy\\nCONFIGFILE='+ (file.endsWith('backup')?backup:primary);if(file.endsWith('.log'))return '[NOTICE] using resolver-b' + (commands.length ? '\\nServer with the lowest initial latency: resolver-b (rtt: 17ms), live servers: 3\\nStartup ' + commands.length : '');if(!(file in files))throw new Error('Missing fixture file');return files[file];},list:async()=>[{name:'dnscrypt-proxy'},{name:'dnscrypt-proxy-backup'}],write:async(file,data)=>{writes.push(file);files[file]=data;},exec:async(file,args)=>{commands.push([file,args]);if(file.startsWith('/etc/init.d/'))services[file.split('/').pop()].instances.instance1.running=args[0]!=='stop';return {code:0,stdout:file.startsWith('/etc/init.d/')?'action accepted':'[]',stderr:''};}};
-window.histories={};const rpc={declare:({object,method})=>object==='dnscrypt-forge-files'?async(config,path,content,expected,exists)=>{if(method==='resolvers'){if(window.resolverError)return {error:window.resolverError};const result=await apiFs.exec('/usr/sbin/dnscrypt-proxy',['-config',config,path?'-list-all':'-list','-json']);try {const servers=new Function('editorLabel', ${JSON.stringify(resolverParser)}+';return parseResolverList(arguments[1]);')((a)=>a,(result.stdout||'')+'\\n'+(result.stderr||''));return {servers};}catch(error){return {error:error.message};}}if(method==='stat'){const size=(window.fileSizes||{})[path]??new TextEncoder().encode(files[path]||'').length;return {exists:path in files,size,limit:1048576,editable:size<=1048576};}if(method==='read'){(window.fileReads||=[]).push(path);return {content:files[path]||'',exists:path in files};}if(method==='versions')return {versions:(histories[path]||[]).map((x,i)=>({id:String(i),time:1700000000+i}))};if(method==='version')return {content:histories[path][Number(content)]};if((files[path]||'')!==expected || (path in files)!==exists)return {error:'File changed externally'};if(exists){histories[path]=[files[path],...(histories[path]||[])].slice(0,10);}writes.push(path);files[path]=content;return {saved:true};}: object==='dnscrypt-forge'?async(service)=>({running:services[service].instances.instance1.running,pid:999,log:commands.length?'Server with the lowest initial latency: resolver-b (rtt: 17ms), live servers: 3\\nStartup '+commands.length:''}):object==='uci'?async()=>({value:'ru'}):object==='service'?async name=>name?{[name]:services[name]}:services:async file=>({data:await apiFs.read(file)})};
+const apiFs={read:async file=>{reads.push(file);if(file.startsWith('/etc/init.d/'))return 'PROG=/usr/sbin/dnscrypt-proxy\\nCONFIGFILE='+ (file.endsWith('backup')?backup:primary);if(file.endsWith('.log'))return '[NOTICE] using resolver-b' + (commands.filter(item => ['start','stop','restart'].includes(item[1][0])).length ? '\\nServer with the lowest initial latency: resolver-b (rtt: 17ms), live servers: 3\\nStartup ' + commands.filter(item => ['start','stop','restart'].includes(item[1][0])).length : '');if(!(file in files))throw new Error('Missing fixture file');return files[file];},list:async directory=>directory==='/etc/rc.d'?Object.keys(bootEnabled).filter(name=>bootEnabled[name]).map(name=>({name:'S17'+name})):[{name:'dnscrypt-proxy'},{name:'dnscrypt-proxy-backup'}],write:async(file,data)=>{writes.push(file);files[file]=data;},exec:async(file,args)=>{commands.push([file,args]);if(file.startsWith('/etc/init.d/')){const name=file.split('/').pop();if(args[0]==='enable'||args[0]==='disable'){if(window.failAutostart)return {code:1,stderr:'Denied'};bootEnabled[name]=args[0]==='enable';sessionStorage.setItem('bootEnabled',JSON.stringify(bootEnabled));}else services[name].instances.instance1.running=args[0]!=='stop';}return {code:0,stdout:file.startsWith('/etc/init.d/')?'action accepted':'[]',stderr:''};}};
+window.histories={};const rpc={declare:({object,method})=>object==='dnscrypt-forge-files'?async(config,path,content,expected,exists)=>{if(method==='resolvers'){if(window.resolverError)return {error:window.resolverError};const result=await apiFs.exec('/usr/sbin/dnscrypt-proxy',['-config',config,path?'-list-all':'-list','-json']);try {const servers=new Function('editorLabel', ${JSON.stringify(resolverParser)}+';return parseResolverList(arguments[1]);')((a)=>a,(result.stdout||'')+'\\n'+(result.stderr||''));return {servers};}catch(error){return {error:error.message};}}if(method==='stat'){const size=(window.fileSizes||{})[path]??new TextEncoder().encode(files[path]||'').length;return {exists:path in files,size,limit:1048576,editable:size<=1048576};}if(method==='read'){(window.fileReads||=[]).push(path);return {content:files[path]||'',exists:path in files};}if(method==='versions')return {versions:(histories[path]||[]).map((x,i)=>({id:String(i),time:1700000000+i}))};if(method==='version')return {content:histories[path][Number(content)]};if((files[path]||'')!==expected || (path in files)!==exists)return {error:'File changed externally'};if(exists){histories[path]=[files[path],...(histories[path]||[])].slice(0,10);}writes.push(path);files[path]=content;return {saved:true};}: object==='dnscrypt-forge'?async(service)=>({running:services[service].instances.instance1.running,pid:999,log:commands.filter(item => ['start','stop','restart'].includes(item[1][0])).length?'Server with the lowest initial latency: resolver-b (rtt: 17ms), live servers: 3\\nStartup '+commands.filter(item => ['start','stop','restart'].includes(item[1][0])).length:''}):object==='uci'?async()=>({value:'ru'}):object==='service'?async name=>name?{[name]:services[name]}:services:async file=>({data:await apiFs.read(file)})};
 const ui={createHandlerFn:(obj,name)=>e=>{e.preventDefault();return obj[name]();},addNotification:(_,node)=>document.getElementById('notifications').appendChild(node),showModal:(_,nodes)=>{window.modal=E('div',{id:'modal'},nodes);document.body.appendChild(modal);},hideModal:()=>window.modal?.remove()};
 const poll={add:callback=>window.refreshStatus=callback};
 const L={resolveDefault:(promise,fallback)=>promise.catch(()=>fallback)};
@@ -53,15 +54,18 @@ async function main() {
     await driver.get(url);
     await driver.wait(async()=>driver.executeScript('return window.ready || false'),10000);
     assert.equal(await driver.executeScript('return document.getElementById("config-textarea").value === app.configContent'),true,'TOML must remain literal, including HTML entities and closing tags');
-    assert.match(await driver.findElement(By.id('forge-version')).getText(),/1\.3-r6/);
+    assert.match(await driver.findElement(By.id('forge-version')).getText(),/1\.3-r8/);
     assert.equal(await driver.findElement(By.css('#forge-version a')).getAttribute('href'),'https://github.com/numbereleven-a/luci-app-dnscrypt-proxy2_forge');
-    assert.equal((await driver.findElements(By.css('#instance-overview th'))).length,4);
+    assert.equal((await driver.findElements(By.css('#instance-overview th'))).length,5);
+    assert.equal(await driver.findElement(By.id('instance-autostart-dnscrypt-proxy/instance1')).getText(),'Включён');
+    assert.equal(await driver.findElement(By.id('instance-autostart-dnscrypt-proxy-backup/instance1')).getText(),'Выключен');
     assert.equal(await driver.findElement(By.id('instance-listen-dnscrypt-proxy/instance1')).getText(),'127.0.0.1:5300');
     assert.equal(await driver.findElement(By.id('instance-listen-dnscrypt-proxy-backup/instance1')).getText(),'127.0.0.1:5400');
     assert.equal(await driver.executeScript("return Array.from(document.querySelectorAll('#instance-overview th, #instance-overview td')).every(el=>getComputedStyle(el).textAlign==='left')"),true);
     const selection = await driver.findElement(By.css('#dnscrypt-proxy-form > .cbi-section select'));
     assert.equal((await selection.findElements(By.css('option'))).length,2);
     assert.equal(await selection.getAttribute('value'),'dnscrypt-proxy/instance1');
+    assert.equal(await driver.findElement(By.id('service-autostart')).isSelected(),true);
     assert.equal(await driver.findElement(By.css('[name="server_names"]')).getAttribute('value'),'resolver-a');
     await driver.executeScript('return app.handleSave()');
     assert.equal(await driver.executeScript('return files[Object.keys(files)[0]]===originalFiles[Object.keys(files)[0]]'),true);
@@ -78,6 +82,28 @@ async function main() {
     assert.equal(await driver.findElement(By.id('instance-selector')).getAttribute('value'),'dnscrypt-proxy/instance1');
     await driver.executeScript("const s=document.getElementById('instance-selector');s.value='dnscrypt-proxy-backup/instance1';s.dispatchEvent(new Event('change'));");
     await driver.wait(async()=>driver.executeScript('return window.ready && document.getElementById("instance-selector").value==="dnscrypt-proxy-backup/instance1"'),10000);
+
+    const bootSwitch=await driver.findElement(By.id('service-autostart'));
+    assert.equal(await bootSwitch.isSelected(),false,'Show selected service autostart');
+    await bootSwitch.click();
+    await driver.wait(()=>bootSwitch.isEnabled(),3000);
+    assert.deepEqual(await driver.executeScript('return commands.at(-1)'),['/etc/init.d/dnscrypt-proxy-backup',['enable']]);
+    assert.equal(await driver.findElement(By.id('instance-autostart-dnscrypt-proxy-backup/instance1')).getText(),'Включён');
+    assert.equal(await driver.findElement(By.id('btn_stop')).isEnabled(),true,'Enabling autostart must not stop the running service');
+    await driver.navigate().refresh();
+    await driver.wait(()=>driver.executeScript('return window.ready||false'),10000);
+    assert.equal(await driver.findElement(By.id('service-autostart')).isSelected(),true,'Autostart persists on reload');
+    await driver.findElement(By.id('service-autostart')).click();
+    await driver.wait(()=>driver.findElement(By.id('service-autostart')).isEnabled(),3000);
+    assert.deepEqual(await driver.executeScript('return commands.at(-1)'),['/etc/init.d/dnscrypt-proxy-backup',['disable']]);
+    assert.equal(await driver.findElement(By.id('instance-autostart-dnscrypt-proxy-backup/instance1')).getText(),'Выключен');
+    assert.equal(await driver.findElement(By.id('instance-autostart-dnscrypt-proxy/instance1')).getText(),'Включён');
+    assert.equal(await driver.findElement(By.id('btn_stop')).isEnabled(),true,'Disabling autostart must not stop the running service');
+    await driver.executeScript('window.failAutostart=true');
+    await driver.findElement(By.id('service-autostart')).click();
+    await driver.wait(()=>driver.findElement(By.id('service-autostart')).isEnabled(),3000);
+    assert.equal(await driver.findElement(By.id('service-autostart')).isSelected(),false,'Failed change restores the checkbox');
+    await driver.executeScript('window.failAutostart=false');
 
     await driver.executeScript("document.querySelector('[name=server_names]').value='resolver-c';document.querySelector('[name=listen_addresses]').value='127.0.0.1:5401, [::1]:5401';return app.handleSaveApply();");
     assert.equal(await driver.executeScript('return files[Object.keys(files)[0]]===originalFiles[Object.keys(files)[0]]'),true);
@@ -99,6 +125,9 @@ async function main() {
     assert.equal(await driver.findElement(By.id('btn_start')).isEnabled(),true);
     assert.equal(await driver.findElement(By.id('btn_stop')).isEnabled(),false);
     assert.match(await driver.executeScript('return files["/etc/dnscrypt-proxy2/backup/dnscrypt-proxy.toml"]'),/resolver-stopped/);
+    await driver.findElement(By.id('service-autostart')).click();
+    await driver.wait(()=>driver.findElement(By.id('service-autostart')).isEnabled(),3000);
+    assert.equal(await driver.findElement(By.id('btn_start')).isEnabled(),true,'Enabling autostart must not start a stopped service');
     await driver.findElement(By.css('#tab-logging a')).click();
     await driver.findElement(By.id('btn_refresh_log')).click();
     await driver.wait(until.elementTextContains(await driver.findElement(By.id('log-view-content')),'resolver-b'),3000);

@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const source = fs.readFileSync(path.join(__dirname, '../htdocs/luci-static/resources/dnscrypt-forge-v13r6.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../htdocs/luci-static/resources/dnscrypt-forge-v13r8.js'), 'utf8');
 class BaseClass {
   static extend(properties) {
     class Child extends this {}
@@ -56,7 +56,7 @@ assert.equal(forge.parseToml(forge.updateToml('proxy = "old"\n', { proxy: 'a\\b"
 assert.throws(() => forge.updateToml('server_names = [\n', { server_names: [] }));
 
 // Exercise the actual view handlers with a DOM containing the editable fields.
-const viewSource = fs.readFileSync(path.join(__dirname, '../htdocs/luci-static/resources/view/dnscrypt-proxy2-forge/dnscrypt-proxy2-v13r6.js'), 'utf8');
+const viewSource = fs.readFileSync(path.join(__dirname, '../htdocs/luci-static/resources/view/dnscrypt-proxy2-forge/dnscrypt-proxy2-v13r8.js'), 'utf8');
 const elements = {};
 const form = { querySelectorAll: () => Object.values(elements).filter(el => el.name) };
 const files = { [config]: toml, [backup]: toml.replace('5300', '5400') };

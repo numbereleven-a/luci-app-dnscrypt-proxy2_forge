@@ -5,11 +5,23 @@
 'require poll';
 'require rpc';
 'require ui';
-'require dnscrypt-forge-v13r6 as forge';
+'require dnscrypt-forge-v13r8 as forge';
 
 var CONFIG_FILE, INIT_SCRIPT, selectedInstance, allInstances = [], loadedConfig = '';
 var originalFields = {};
 var actionBusy = false;
+var autostartEnabled = null;
+
+function serviceAutostart(entries, service) {
+	return entries.some(function(entry) {
+		return entry.name.replace(/^S[0-9]+/, '') === service && /^S[0-9]+/.test(entry.name);
+	});
+}
+
+function autostartLabel(enabled) {
+	return enabled === null ? editorLabel('Unavailable', 'Недоступно') :
+		editorLabel(enabled ? 'Enabled' : 'Disabled', enabled ? 'Включён' : 'Выключен');
+}
 
 var callInstanceLogs = rpc.declare({
 	object: 'dnscrypt-forge', method: 'logs', params: ['service', 'instance', 'previous_pid'], expect: { '': {} }
@@ -42,6 +54,8 @@ function operationText(message) {
 
 function setActionBusy(busy) {
 	actionBusy = busy;
+	var autostart = document.getElementById('service-autostart');
+	if (autostart) autostart.disabled = busy || autostartEnabled === null;
 	['btn_start', 'btn_stop', 'btn_restart', 'instance-selector'].forEach(function(id) {
 		var el = document.getElementById(id);
 		if (!el) return;
@@ -1113,7 +1127,7 @@ function ruleEditorPanel(kinds) {
 return view.extend({
 	load: function() {
 		var self = this;
-		return Promise.all([getSystemLanguage(), callServiceList(), fs.list('/etc/init.d')]).then(function(data) {
+		return Promise.all([getSystemLanguage(), callServiceList(), fs.list('/etc/init.d'), L.resolveDefault(fs.list('/etc/rc.d'), null)]).then(function(data) {
 			var names = data[2].filter(function(entry) { return forge.safeService(entry.name); });
 			return Promise.all(names.map(function(entry) {
 				return fs.read('/etc/init.d/' + entry.name).then(function(content) { return [entry.name, content]; });
@@ -1128,6 +1142,10 @@ return view.extend({
 				selectedInstance = selectedInstance || allInstances[0];
 				CONFIG_FILE = selectedInstance.config;
 				INIT_SCRIPT = '/etc/init.d/' + selectedInstance.service;
+				allInstances.forEach(function(row) {
+					row.autostart = data[3] === null ? null : serviceAutostart(data[3], row.service);
+				});
+				autostartEnabled = selectedInstance.autostart;
 				return Promise.all(allInstances.map(function(row) {
 					return fs.read(row.config).then(function(content) {
 						row.listenAddresses = forge.parseToml(content).listen_addresses;
@@ -1271,6 +1289,44 @@ return view.extend({
 	render: function(isRunning) {
 		var self = this;
 		var config = parseToml(this.configContent || '');
+		var autostartStatus = textElement('span', {}, autostartLabel(autostartEnabled));
+		var autostartSection = textElement('div', { class: 'cbi-section', style: 'margin-top:24px' }, [
+			textElement('label', { style: 'display:flex;align-items:center;gap:8px' }, [
+				textElement('input', {
+					id: 'service-autostart', type: 'checkbox',
+					checked: autostartEnabled ? 'checked' : null,
+					disabled: autostartEnabled === null ? 'disabled' : null,
+					change: function(event) {
+						var checkbox = event.target, requested = checkbox.checked;
+						setActionBusy(true);
+						checkedExec(INIT_SCRIPT, [requested ? 'enable' : 'disable']).then(function() {
+							return fs.list('/etc/rc.d').catch(function(error) { autostartEnabled = null; throw error; });
+						}).then(function(entries) {
+							autostartEnabled = serviceAutostart(entries, selectedInstance.service);
+							if (autostartEnabled !== requested) throw new Error(editorLabel('Autostart setting was not applied.', 'Настройка автозапуска не применилась.'));
+							showNotification(null, editorLabel('Autostart setting saved. Running state unchanged.', 'Настройка автозапуска сохранена. Состояние процесса не изменено.'), 'info');
+						}).catch(function(error) {
+							showNotification(null, error.message, 'error');
+						}).finally(function() {
+							checkbox.checked = !!autostartEnabled;
+							autostartStatus.textContent = autostartLabel(autostartEnabled);
+							allInstances.forEach(function(row) {
+								if (row.service !== selectedInstance.service) return;
+								row.autostart = autostartEnabled;
+								var cell = document.getElementById('instance-autostart-' + row.id);
+								if (cell) cell.textContent = autostartLabel(row.autostart);
+							});
+							setActionBusy(false);
+						});
+					}
+				}),
+				editorLabel('Start on boot', 'Запускать при загрузке'), autostartStatus
+			]),
+			textElement('p', { style: 'font-size:12px;color:#666' }, editorLabel(
+				'Saved immediately. Controls startup after reboot; does not start or stop the service now.',
+				'Сохраняется сразу. Управляет запуском после перезагрузки; сейчас сервис не запускает и не останавливает.')),
+			selectedInstance.shared ? textElement('p', {}, editorLabel('Applies to all instances of this service.', 'Применяется ко всем инстансам этого сервиса.')) : null
+		].filter(function(node) { return node !== null; }));
 		
 		// Status section with styled badge
 		var statusSection = textElement('div', { class: 'cbi-section' }, [
@@ -1992,6 +2048,7 @@ return view.extend({
 		var instanceRows = allInstances.map(function(row) {
 			return textElement('tr', {}, [textElement('td', { style: 'text-align: left; vertical-align: top' }, row.service + ' / ' + row.instance),
 				textElement('td', { id: 'instance-status-' + row.id, style: 'text-align: left; vertical-align: top' }, row.running ? i18n('RUNNING') : i18n('NOT RUNNING')),
+				textElement('td', { id: 'instance-autostart-' + row.id, style: 'text-align: left; vertical-align: top' }, autostartLabel(row.autostart)),
 				textElement('td', { id: 'instance-listen-' + row.id, style: 'text-align: left; vertical-align: top' }, formatListenAddresses(row.listenAddresses)),
 				textElement('td', { style: 'text-align: left; vertical-align: top' }, row.config)]);
 		});
@@ -1999,7 +2056,7 @@ return view.extend({
 			textElement('h3', {}, i18n('Instances')), selector,
 			textElement('p', {}, i18n('Settings and actions apply to the selected instance.')),
 			textElement('div', { style: 'overflow-x: auto' }, [textElement('table', { class: 'table', id: 'instance-overview' }, [textElement('tr', {},
-				['Instance', 'Service Status', 'Listen Addresses', 'Configuration'].map(function(label) {
+				['Instance', 'Service Status', editorLabel('Autostart', 'Автозапуск'), 'Listen Addresses', 'Configuration'].map(function(label) {
 					return textElement('th', { style: 'text-align: left; vertical-align: top' }, i18n(label));
 				}))].concat(instanceRows))]),
 			selectedInstance.shared ? textElement('p', {}, i18n('This service controls multiple instances. Use SSH for service actions.')) : null
@@ -2011,10 +2068,11 @@ return view.extend({
 			submit: ui.createHandlerFn(this, 'handleSave')
 		}, [
 			textElement('h2', {}, 'DNSCrypt-Proxy 2 Forge'),
-            textElement('p',{id:'forge-version'},[editorLabel('Version: ','Версия: '),'1.3-r6 · ',textElement('a',{href:'https://github.com/numbereleven-a/luci-app-dnscrypt-proxy2_forge',target:'_blank',rel:'noopener noreferrer'},'GitHub')]),
+            textElement('p',{id:'forge-version'},[editorLabel('Version: ','Версия: '),'1.3-r8 · ',textElement('a',{href:'https://github.com/numbereleven-a/luci-app-dnscrypt-proxy2_forge',target:'_blank',rel:'noopener noreferrer'},'GitHub')]),
 			instancePanel,
 			statusSection,
 			controlSection,
+			autostartSection,
 			textElement('div', { class: 'cbi-section' }, [
 				textElement('h3', {}, i18n('Operation output')),
 				textElement('p', {}, i18n('Startup messages and resolver latency appear here when reported by DNSCrypt.')),
